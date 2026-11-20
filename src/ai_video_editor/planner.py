@@ -87,10 +87,14 @@ def validate_editing_plan(project: Project, plan: Any, *, require_current: bool 
                      'revisions_used', 'approved_by_user', 'seed'}
     if not isinstance(meta, dict) or set(meta) != required_meta:
         raise PlanError('Invalid plan_meta structure')
-    if (meta['source'] != 'rule_based' or meta['provider'] is not None or meta['model'] is not None
-        or meta['prompt_version'] != PROMPT_VERSION or meta['revisions_used'] != 0
+    valid_rule = (meta['source'] == 'rule_based' and meta['provider'] is None
+                  and meta['model'] is None and meta['prompt_version'] == PROMPT_VERSION)
+    valid_ai = (meta['source'] == 'ai_assisted' and meta['prompt_version'] == 'ai-scene-v2.3.0'
+                and meta['provider'] in ('openai','manual')
+                and (meta['model'] is None or isinstance(meta['model'], str)))
+    if (not (valid_rule or valid_ai) or meta['revisions_used'] != 0
         or type(meta['approved_by_user']) is not bool or type(meta['seed']) is not int):
-        raise PlanError('Invalid rule-based plan metadata')
+        raise PlanError('Invalid editing plan metadata')
     scenes = plan['scenes']
     expected_ids = [scene['scene_id'] for scene in project.storyboard['scenes']]
     if not isinstance(scenes, list) or [s.get('scene_id') if isinstance(s, dict) else None for s in scenes] != expected_ids:

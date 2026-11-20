@@ -1,0 +1,38 @@
+{
+  "style": "documentary",
+  "scenes": [
+    {
+      "scene_id": "001",
+      "media_type": "image",
+      "asset_prompt_en": "Wide cinematic ocean view from above, documentary, natural sunlight, 16:9, no text",
+      "estimated_duration_seconds": 10,
+      "motion": "pan_right",
+      "motion_intensity": "subtle",
+      "transition_to_next": "dissolve",
+      "transition_length": "short",
+      "reason": "Slow pan establishes the ocean setting"
+    },
+    {
+      "scene_id": "002",
+      "media_type": "video_clip",
+      "asset_prompt_en": "Slow tracking shot of tropical coral reef and small fish, realistic documentary, 16:9, no text",
+      "estimated_duration_seconds": 8,
+      "motion": "static",
+      "motion_intensity": "subtle",
+      "transition_to_next": "dissolve",
+      "transition_length": "short",
+      "reason": "Source video already contains camera movement"
+    },
+    {
+      "scene_id": "003",
+      "media_type": "video_clip",
+      "asset_prompt_en": "Descending into deep blue ocean with fading daylight, cinematic nature documentary, 16:9, no text",
+      "estimated_duration_seconds": 12,
+      "motion": "static",
+      "motion_intensity": "subtle",
+      "transition_to_next": "none",
+      "transition_length": null,
+      "reason": "End of documentary, no outgoing transition"
+    }
+  ]
+}

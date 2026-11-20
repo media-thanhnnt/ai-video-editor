@@ -76,6 +76,36 @@ def main(argv: list[str] | None = None) -> int:
     agent_compile = cmd.add_parser('agent-compile', help='Compile reviewed plan to Core storyboard.json')
     agent_compile.add_argument('project_id')
     agent_compile.add_argument('--replace-storyboard', action='store_true')
+    script_cmd = cmd.add_parser('agent-script', help='Phase 2.2: create reviewable script from OpenAI or manual JSON')
+    script_cmd.add_argument('project_id')
+    script_input = script_cmd.add_mutually_exclusive_group(required=True)
+    script_input.add_argument('--request', help='Natural language video request')
+    script_input.add_argument('--request-file', type=Path, help='UTF-8 plain text request file')
+    script_input.add_argument('--import-json', type=Path, help='Offline import: JSON with script, scenes and prompts')
+    script_cmd.add_argument('--model', default='gpt-4.1-mini')
+    script_cmd.add_argument('--replace', action='store_true')
+    approve_script_cmd = cmd.add_parser('agent-script-approve', help='Approve Phase 2.2 script draft after review')
+    approve_script_cmd.add_argument('project_id')
+    export_script_cmd = cmd.add_parser('agent-script-export', help='Export approved script as Phase 2.1 manual brief')
+    export_script_cmd.add_argument('project_id')
+    export_script_cmd.add_argument('--replace', action='store_true')
+    script_status_cmd = cmd.add_parser('agent-script-status', help='Inspect Phase 2.2 draft, status and usage')
+    script_status_cmd.add_argument('project_id')
+    scene_cmd = cmd.add_parser('agent-scene-plan', help='Phase 2.3: propose an AI editing plan from an approved script')
+    scene_cmd.add_argument('project_id')
+    scene_src = scene_cmd.add_mutually_exclusive_group(required=True)
+    scene_src.add_argument('--model', help='OpenAI model for scene planning')
+    scene_src.add_argument('--import-json', type=Path, help='Offline scene plan JSON')
+    scene_cmd.add_argument('--replace', action='store_true')
+    for name, description in (
+        ('agent-scene-status','Inspect scene-plan draft and token usage'),
+        ('agent-scene-approve','Approve Phase 2.3 scene proposal'),
+        ('agent-scene-export','Export approved scene decisions to a manual-asset brief'),
+        ('agent-scene-apply','Compile approved scene decisions to Core editing_plan.json')):
+        sp=cmd.add_parser(name, help=description)
+        sp.add_argument('project_id')
+        if name in ('agent-scene-export','agent-scene-apply'):
+            sp.add_argument('--replace',action='store_true')
     cmd.add_parser('agent-tools', help='List safe Phase 2.1 agent tools')
     cmd.add_parser('list', help='List local projects')
     args = parser.parse_args(argv)
@@ -192,6 +222,67 @@ def main(argv: list[str] | None = None) -> int:
                               'checks':qa['checks'], 'warnings':qa['warnings']},ensure_ascii=False,indent=2))
             if qa['status'] != 'PASS':
                 return 1
+        elif args.action in ('agent-scene-plan','agent-scene-status','agent-scene-approve',
+                             'agent-scene-export','agent-scene-apply'):
+            from .agent.scene_planner import (
+                generate_openai_scene_plan, create_scene_plan, load_scene_plan,
+                approve_scene_plan, export_scene_brief, apply_scene_plan)
+            from .agent.script_generator import load_script_draft
+            project=pm.load_project(args.project_id)
+            if args.action=='agent-scene-plan':
+                # Validate existing draft before a potentially billable API request.
+                if (project.folder/'agent_scene_plan.json').exists() and not args.replace:
+                    raise ValidationError('Scene plan exists; use --replace to overwrite')
+                if args.import_json:
+                    content=read_json(args.import_json)
+                    payload=create_scene_plan(project,content,source='manual',replace=args.replace)
+                else:
+                    script=load_script_draft(project)
+                    from .agent.script_generator import digest
+                    if script.get('status')!='SCRIPT_APPROVED' or script.get('approved_hash')!=digest(script['content']):
+                        raise ValidationError('Approve unchanged Phase 2.2 script before AI planning')
+                    content,usage=generate_openai_scene_plan(script['content'],model=args.model)
+                    payload=create_scene_plan(project,content,source='openai',usage=usage,replace=args.replace)
+            elif args.action=='agent-scene-approve':
+                payload=approve_scene_plan(project)
+            elif args.action=='agent-scene-export':
+                payload=export_scene_brief(project,replace=args.replace)
+            elif args.action=='agent-scene-apply':
+                payload=apply_scene_plan(project,replace=args.replace)
+            else:
+                doc=load_scene_plan(project)
+                payload={'project_id':project.project_id,'status':doc['status'],
+                         'scenes':len(doc['content']['scenes']),'source':doc['source'],
+                         'usage':doc['usage']}
+            print(json.dumps(payload,ensure_ascii=False,indent=2))
+        elif args.action in ('agent-script', 'agent-script-approve', 'agent-script-export', 'agent-script-status'):
+            from .agent.script_generator import (openai_generate, create_script_draft, load_script_draft,
+                                                 approve_script, export_agent_brief)
+            project = pm.load_project(args.project_id)
+            if args.action == 'agent-script':
+                # Reject before billable API call when overwriting was not authorized.
+                if (project.folder / 'agent_script_draft.json').exists() and not args.replace:
+                    raise ValidationError('Agent script draft exists; use --replace to overwrite')
+                if args.import_json:
+                    content = read_json(args.import_json)
+                    payload = create_script_draft(project, content, source='manual', replace=args.replace)
+                else:
+                    requirement = (args.request_file.read_text(encoding='utf-8') if args.request_file else args.request)
+                    if not requirement or not requirement.strip():
+                        raise ValidationError('Natural language requirement must not be empty')
+                    content, usage = openai_generate(requirement, model=args.model)
+                    payload = create_script_draft(project, content, source='openai', brief=requirement,
+                                                  usage=usage, replace=args.replace)
+            elif args.action == 'agent-script-approve':
+                payload = approve_script(project)
+            elif args.action == 'agent-script-export':
+                payload = export_agent_brief(project, replace=args.replace)
+            else:
+                draft = load_script_draft(project)
+                payload = {'project_id': project.project_id, 'status': draft['status'],
+                           'source': draft['source'], 'title': draft['content']['title'],
+                           'scenes': len(draft['content']['scenes']), 'usage': draft['usage']}
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
         elif args.action in ('agent-init','agent-status','agent-bind','agent-approve','agent-compile','agent-tools'):
             from .agent import (registry, create_manifest, load_manifest, missing_assets,
                                 bind_asset, approve_manifest, compile_storyboard)

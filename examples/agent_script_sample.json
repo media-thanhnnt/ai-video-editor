@@ -1,0 +1,24 @@
+{
+  "title": "Bí ẩn dưới đại dương",
+  "language": "vi",
+  "style": "documentary",
+  "target_duration_seconds": 20,
+  "summary": "Giới thiệu thế giới sinh vật sâu dưới mặt nước.",
+  "script": "Dưới đại dương là một thế giới đầy bí ẩn. Những rạn san hô tạo nên một hệ sinh thái rực rỡ.",
+  "scenes": [
+    {
+      "scene_id": "001",
+      "type": "image",
+      "narration": "Dưới đại dương là một thế giới đầy bí ẩn.",
+      "prompt": "Cinematic underwater landscape, deep blue ocean, documentary light rays, 16:9",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "scene_id": "002",
+      "type": "video_clip",
+      "narration": "Những rạn san hô tạo nên một hệ sinh thái rực rỡ.",
+      "prompt": "Slow cinematic camera move over glowing coral, documentary, realistic, 16:9",
+      "estimated_duration_seconds": 10
+    }
+  ]
+}

@@ -281,3 +281,11 @@ and fade lengths. Full contract: `docs/phase1-10-1-contract.md`.
 ## Phase 1.10.3 — Precision & Cache Correctness
 
 See [release notes](RELEASE_NOTES_1.10.3.md) for implementation details, regression tests, and Windows upgrade instructions.
+
+## Phase 2.2 — AI Requirement & Script Generator
+
+Phase 2.2 extends the existing Phase 2.1 Agent with a reviewable natural-language-to-script pipeline. It supports explicit OpenAI Responses API calls or free offline JSON import from your existing chatbot. **No media generation API is called**. See [README_PHASE2_2.md](README_PHASE2_2.md).
+
+## Phase 2.3 — AI Scene & Storyboard Planner
+
+See [README_PHASE2_3.md](README_PHASE2_3.md) for CLI and safety/approval flow.
