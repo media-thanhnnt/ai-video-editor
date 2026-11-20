@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.1",
+  "project_id": "video_001",
+  "title": "Bí ẩn đại dương",
+  "voice_mode": "per_scene",
+  "scenes": [
+    {"scene_id": "001", "order": 1, "narration": "Đại dương chứa nhiều bí ẩn...", "image": "assets/images/scene_001.png", "audio": "assets/audio/scene_001.mp3"},
+    {"scene_id": "002", "order": 2, "narration": "Ánh sáng giảm dần theo độ sâu...", "image": "assets/images/scene_002.png", "audio": "assets/audio/scene_002.mp3"}
+  ]
+}

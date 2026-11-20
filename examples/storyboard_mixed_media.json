@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.1",
+  "project_id": "mixed_media_demo",
+  "title": "Mixed Media — Images, Animation and Video",
+  "voice_mode": "per_scene",
+  "scenes": [
+    {
+      "scene_id": "001",
+      "order": 1,
+      "type": "image",
+      "narration": "Một câu chuyện bắt đầu.",
+      "image": "assets/images/scene_001.png",
+      "audio": "assets/audio/scene_001.wav"
+    },
+    {
+      "scene_id": "002",
+      "order": 2,
+      "type": "image_sequence",
+      "narration": "",
+      "sequence": {
+        "frames_dir": "assets/sequences/throw_ball",
+        "frame_pattern": "frame_%04d.png",
+        "frame_count": 90,
+        "fps": "30/1"
+      }
+    },
+    {
+      "scene_id": "003",
+      "order": 3,
+      "type": "video_clip",
+      "video": "assets/videos/scene_003.mp4",
+      "narration": ""
+    }
+  ],
+  "audio_tracks": [
+    {
+      "file": "assets/audio/background.wav",
+      "start_seconds": 0,
+      "volume": 0.15
+    }
+  ],
+  "subtitles": [
+    {
+      "start_seconds": 0,
+      "end_seconds": 1.2,
+      "text": "Một câu chuyện bắt đầu."
+    }
+  ]
+}

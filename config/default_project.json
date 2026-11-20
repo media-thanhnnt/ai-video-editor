@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.1",
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": "30/1",
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "audio_sample_rate": 48000,
+    "audio_channels": 2,
+    "encoder_preset": "medium",
+    "quality": "high"
+  },
+  "image": {
+    "fit_mode": "cover"
+  },
+  "timing": {
+    "pad_head_seconds": 0.2,
+    "pad_tail_seconds": 0.4,
+    "min_scene_seconds": 2.0,
+    "allow_approximate_timing": false
+  },
+  "transitions": {
+    "length_seconds": {
+      "short": 0.2,
+      "medium": 0.4,
+      "long": 0.6
+    },
+    "intro": "fade_from_black",
+    "outro": "fade_to_black",
+    "intro_outro_seconds": 0.4,
+    "violation_policy": "clamp_and_warn"
+  },
+  "motion": {
+    "zoom_factor": {
+      "subtle": 1.05,
+      "medium": 1.1,
+      "strong": 1.18
+    },
+    "easing": "ease_in_out",
+    "supersample_factor": 3
+  },
+  "audio": {
+    "music_enabled": true,
+    "music_base_gain_db": -16,
+    "duck_depth_db": -10,
+    "duck_attack_ms": 150,
+    "duck_release_ms": 400,
+    "music_fade_in_seconds": 1.5,
+    "music_fade_out_seconds": 3.0,
+    "loudness_target_lufs": -14,
+    "true_peak_max_dbtp": -1.0
+  },
+  "subtitles": {
+    "mode": "sidecar",
+    "font_file": "assets/fonts/subtitle.ttf",
+    "max_chars_per_line": 42,
+    "max_lines": 2,
+    "safe_area_bottom_percent": 8
+  },
+  "planning": {
+    "use_ai": true,
+    "style": "documentary",
+    "max_revisions": 2,
+    "require_plan_approval": true,
+    "seed": 12345
+  },
+  "retry": {
+    "render_max_attempts": 2,
+    "backoff_seconds": [
+      5,
+      30
+    ]
+  }
+}

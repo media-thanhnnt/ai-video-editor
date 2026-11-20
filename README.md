@@ -1,326 +1,283 @@
-# AI Video Editor Core
+# AI Video Editor Core — Phase 1.10.2
 
-> Công cụ dòng lệnh (CLI) viết bằng Python, điều phối FFmpeg để **tự động dựng video** từ storyboard JSON: ảnh tĩnh có chuyển động Zoom/Pan, chuỗi ảnh animation, video clip có sẵn, giọng đọc, nhạc nền và phụ đề.
+Phase 1.10.2 is a correctness, media-compatibility and render-cache update to the accepted Phase 1.10.1 engine. It supports `image` (Zoom/Pan), `image_sequence`, and `video_clip` sources, while mixing narration, video-embedded audio, background tracks, and SRT or burned-in subtitles.
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![FFmpeg](https://img.shields.io/badge/FFmpeg-6.1%2B-green)
-![Version](https://img.shields.io/badge/version-1.10.3-informational)
+## Upgrade an existing Windows project
 
----
-
-## Mục lục
-
-- [Tính năng](#tính-năng)
-- [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
-- [Cài đặt](#cài-đặt)
-- [Bắt đầu nhanh](#bắt-đầu-nhanh)
-- [Luồng xử lý](#luồng-xử-lý)
-- [Cấu trúc một project](#cấu-trúc-một-project)
-- [Viết storyboard](#viết-storyboard)
-- [Danh sách lệnh](#danh-sách-lệnh)
-- [Cache, checkpoint và resume](#cache-checkpoint-và-resume)
-- [Cấu trúc repository](#cấu-trúc-repository)
-- [Chạy test](#chạy-test)
-- [Hạn chế hiện tại](#hạn-chế-hiện-tại)
-- [Tài liệu](#tài-liệu)
-- [Giấy phép](#giấy-phép)
-
----
-
-## Tính năng
-
-**Ba loại cảnh (scene)**
-
-| Loại | Mô tả |
-|---|---|
-| `image` | Ảnh tĩnh với chuyển động camera Zoom/Pan (OpenCV Lanczos4, có supersampling) |
-| `image_sequence` | Chuỗi frame đánh số liên tục (`frame_0001.png` …), phát nguyên trạng không nội suy |
-| `video_clip` | Video MP4/MOV/MKV có sẵn, tự chuẩn hóa FPS và độ phân giải, giữ tiếng gốc |
-
-**Âm thanh**
-
-- Giọng đọc theo từng cảnh, đặt chính xác theo **từng mẫu âm thanh (sample)**, không bao giờ bị cắt hay kéo giãn.
-- Tiếng gốc của video clip được đặt tự động theo vị trí cảnh, tự fade theo vùng chuyển cảnh.
-- `audio_tracks` cho nhạc nền và hiệu ứng âm thanh, có chỉnh âm lượng.
-- Limiter chống clipping (bù độ trễ, giữ đồng bộ tuyệt đối).
-
-**Hình ảnh và xuất bản**
-
-- Chuyển cảnh `crossfade`, `dissolve`, `none`; fade intro/outro.
-- Đầu ra H.264 + AAC-LC, màu chuẩn **BT.709**, mặc định 1920×1080, 30 FPS.
-- Phụ đề: soạn trực tiếp trong storyboard hoặc nhập file SRT; xuất file rời (`sidecar`), in cứng vào hình (`burn_in`) hoặc cả hai.
-
-**Độ tin cậy**
-
-- Timeline tính bằng số nguyên frame/sample (dùng `Fraction`, không dùng số thực).
-- Cache theo hash SHA-256, checkpoint/resume khi render bị gián đoạn, khóa chống render trùng.
-- Tự phát hiện plan/timeline/video đã cũ so với đầu vào.
-- Bước duyệt kế hoạch dựng (plan approval) trước khi render.
-- QA tự động, có chế độ quét sâu đoạn hình đen và đoạn im lặng.
-
-> **Lưu ý:** phiên bản hiện tại **chưa** có thành phần AI sinh ảnh/video/giọng nói. Bộ lập kế hoạch (planner) chọn hiệu ứng theo quy tắc và seed ngẫu nhiên có thể tái lập.
-
----
-
-## Yêu cầu hệ thống
-
-| Thành phần | Phiên bản |
-|---|---|
-| Python | 3.10 trở lên |
-| FFmpeg + FFprobe | 6.1 trở lên, có trong `PATH`. Cần bản có `libx264`. Cần thêm `libass` nếu dùng phụ đề `burn_in` |
-| Thư viện Python | Pillow, numpy, opencv-python (cài tự động) |
-| Hệ điều hành | Windows 11 (nền tảng chính), Linux |
-
-Ổ đĩa cần còn trống nhiều: file trung gian FFV1 không nén ở 1080p khá nặng.
-
----
-
-## Cài đặt
+Back up your source and projects first. Extract this release over source folders (`src`, `tests`, `config`, `docs`, `examples`, `scripts`) and `pyproject.toml`. **Do not delete or overwrite your `projects` folder.**
 
 ```powershell
-git clone https://github.com/<tên-tài-khoản>/ai-video-editor-core.git
-cd ai-video-editor-core
-
 py -m pip install -e .
-ai-video-editor --help
-```
-
-> Nên cài ở chế độ **editable** (`-e`). CLI xác định thư mục `projects/` và `config/` dựa trên vị trí mã nguồn.
-
-Kiểm tra FFmpeg:
-
-```powershell
-ffmpeg -version
-ffprobe -version
-ffmpeg -filters | findstr subtitles   # chỉ cần khi dùng burn-in
-```
-
-Trên Linux/macOS, thay `py` bằng `python3` và `findstr` bằng `grep`.
-
----
-
-## Bắt đầu nhanh
-
-### Chạy thử với dữ liệu demo
-
-```powershell
-py scripts/create_demo_assets.py --project-id demo
-ai-video-editor plan demo --style documentary --seed 12345
-ai-video-editor approve-plan demo
-ai-video-editor compose demo --deep
-```
-
-Kết quả: `projects/demo/output/final.mp4`.
-
-### Tạo project của riêng bạn
-
-```powershell
-ai-video-editor init my_video --title "Video đầu tiên"
-# 1. Chép media vào projects/my_video/assets/...
-# 2. Sửa projects/my_video/storyboard.json
-ai-video-editor validate my_video
-ai-video-editor assets my_video
-ai-video-editor plan my_video --style calm --seed 42
-ai-video-editor approve-plan my_video
-ai-video-editor compose my_video --deep
-```
-
----
-
-## Luồng xử lý
-
-```mermaid
-flowchart LR
-    A[storyboard.json<br/>config.json<br/>assets/] --> B[validate<br/>assets]
-    B --> C[plan<br/>approve-plan]
-    C --> D[timeline]
-    D --> E[render<br/>video_only.mp4]
-    E --> F[audio<br/>final.mp4 + SRT]
-    F --> G[qa<br/>integration_report.json]
-```
-
-Lệnh `compose` chạy toàn bộ chuỗi trên trong một lần, tự dùng lại plan đã duyệt và cache.
-
----
-
-## Cấu trúc một project
-
-```text
-projects/<project_id>/
-├── config.json              # cấu hình xuất, hiệu ứng, âm thanh, phụ đề
-├── storyboard.json          # danh sách cảnh, audio_tracks, phụ đề
-├── editing_plan.json        # tạo bởi plan / compose
-├── timeline.json            # tạo bởi timeline / compose
-├── assets/
-│   ├── images/              # ảnh tĩnh
-│   ├── sequences/<tên>/     # frame_0001.png, frame_0002.png, ...
-│   ├── videos/              # MP4 / MOV / MKV
-│   ├── audio/               # giọng đọc, nhạc nền (WAV/MP3)
-│   ├── subtitles/           # file .srt
-│   └── fonts/               # font phụ đề
-├── work/                    # file trung gian và checkpoint (có thể rất lớn)
-├── reports/                 # báo cáo JSON của từng bước
-└── output/
-    ├── video_only.mp4
-    ├── final.mp4
-    └── subtitles.srt
-```
-
-Mọi đường dẫn trong JSON là **đường dẫn tương đối** bên trong project, ví dụ `assets/videos/clip.mp4`.
-
----
-
-## Viết storyboard
-
-```json
-{
-  "schema_version": "1.1",
-  "project_id": "my_video",
-  "title": "Video đầu tiên",
-  "voice_mode": "per_scene",
-  "scenes": [
-    {
-      "scene_id": "001", "order": 1, "type": "image",
-      "narration": "Chúng ta bắt đầu câu chuyện.",
-      "image": "assets/images/scene_001.png",
-      "audio": "assets/audio/voice_001.wav"
-    },
-    {
-      "scene_id": "002", "order": 2, "type": "image_sequence",
-      "narration": "",
-      "sequence": {
-        "frames_dir": "assets/sequences/throw_ball",
-        "frame_pattern": "frame_%04d.png",
-        "frame_count": 90,
-        "fps": "30/1"
-      }
-    },
-    {
-      "scene_id": "003", "order": 3, "type": "video_clip",
-      "video": "assets/videos/scene_003.mp4",
-      "narration": "",
-      "source_audio": { "enabled": true, "volume": 1.0 }
-    }
-  ],
-  "audio_tracks": [
-    { "file": "assets/audio/background.wav", "start_seconds": 0, "volume": 0.15 }
-  ],
-  "subtitles": [
-    { "start_seconds": 0, "end_seconds": 1.2, "text": "Chúng ta bắt đầu câu chuyện." }
-  ]
-}
-```
-
-**Quy tắc chính**
-
-- `order` bắt đầu từ 1 và khớp vị trí trong mảng; `scene_id` không được trùng.
-- Cảnh `image` bắt buộc có `audio`. Cảnh `image_sequence` và `video_clip` có thể im lặng; nếu `narration` có nội dung thì phải kèm `audio`.
-- `image_sequence`: frame đánh số liên tục từ 1, FPS phải bằng FPS đầu ra.
-- `source_audio.enabled`: bỏ trống là giữ tiếng gốc nếu có; `true` là bắt buộc video phải có tiếng; `false` là tắt tiếng.
-- Chỉ dùng **một** trong hai: `subtitles` hoặc `subtitle_file`.
-
-Xem thêm ví dụ trong thư mục [`examples/`](examples/).
-
----
-
-## Danh sách lệnh
-
-| Lệnh | Tùy chọn | Chức năng |
-|---|---|---|
-| `init ID --title TITLE` | | Tạo project mới |
-| `list` | | Liệt kê project |
-| `show ID` | | Xem thông tin project |
-| `validate ID` | | Kiểm tra cấu trúc JSON và đường dẫn |
-| `assets ID` | | Kiểm tra media, ghi `assets_report.json` |
-| `plan ID` | `--style`, `--seed` | Tạo kế hoạch dựng (`documentary`, `calm`, `energetic`) |
-| `approve-plan ID` | | Duyệt kế hoạch dựng |
-| `timeline ID` | `--use-plan` | Dựng timeline frame/sample |
-| `render ID` | `--resume`, `--force`, `--supersample` | Render hình, ra `video_only.mp4` |
-| `audio ID` | | Phối âm, phụ đề, ra `final.mp4` |
-| `qa ID` | `--deep` | Kiểm tra chất lượng, ghi `integration_report.json` |
-| `compose ID` | `--deep`, `--force`, `--replan`, `--style`, `--seed` | Chạy toàn bộ pipeline |
-
-Mã thoát: `0` khi thành công, `1` khi có lỗi hoặc QA FAIL.
-
----
-
-## Cache, checkpoint và resume
-
-Không cần xóa cache thủ công. Hệ thống tự quyết định phần nào cần làm lại dựa trên hash:
-
-| Thay đổi | Phần được làm lại |
-|---|---|
-| Thay ảnh / sequence / video của một cảnh | Cảnh đó và các đoạn ghép liên quan |
-| Đổi giọng đọc (cùng độ dài) | Chỉ bước audio |
-| Đổi nhạc nền, âm lượng | Chỉ bước audio |
-| Sửa phụ đề `sidecar` | Chỉ bước audio |
-| Sửa phụ đề `burn_in` | Bước ghép cuối của video và audio |
-| Đổi plan (`--replan`) | Các cảnh có hiệu ứng thay đổi |
-
-- Render bị gián đoạn (mất điện, Ctrl+C) có thể chạy tiếp bằng `render --resume` hoặc `compose`.
-- `audio` và `qa` từ chối dùng `video_only.mp4` đã cũ so với đầu vào hiện tại.
-- Có thể di chuyển nguyên thư mục project sang vị trí khác mà vẫn giữ được cache.
-- `--force` chỉ dùng khi cố ý render lại toàn bộ.
-
----
-
-## Cấu trúc repository
-
-```text
-ai-video-editor-core/
-├── pyproject.toml
-├── config/default_project.json   # cấu hình mặc định cho project mới
-├── src/ai_video_editor/
-│   ├── cli.py                    # giao diện dòng lệnh
-│   ├── project.py                # tạo/nạp project, kiểm tra schema, ghi JSON an toàn
-│   ├── assets.py                 # kiểm tra media, metadata, hash
-│   ├── sequence.py               # tiện ích cho chuỗi ảnh
-│   ├── planner.py                # lập kế hoạch dựng theo style/seed, duyệt plan
-│   ├── timeline.py               # timeline theo frame/sample, chuyển cảnh
-│   ├── renderer.py               # render 3 loại cảnh, ghép, checkpoint
-│   ├── audio.py                  # phối âm, phụ đề, mux AAC
-│   ├── qa.py                     # kiểm tra chất lượng
-│   └── ffmpeg_support.py         # kiểm tra phiên bản và khả năng của FFmpeg
-├── tests/
-├── docs/                         # hợp đồng kỹ thuật từng phase
-├── examples/                     # storyboard mẫu
-└── scripts/create_demo_assets.py
-```
-
-Thư mục `projects/` chứa dữ liệu người dùng và **không** được đưa vào Git (xem `.gitignore`).
-
----
-
-## Chạy test
-
-```powershell
 py -m unittest discover -s tests -v
 ```
 
-Một số test chạy FFmpeg thật và sẽ tự bỏ qua nếu máy không có FFmpeg.
+**Approval migration:** Existing configs commonly set `planning.require_plan_approval=true`. Phase 1.10.2 enforces this before `render`, `audio` and `compose`. To preserve and explicitly reapprove your previously curated plan (including custom style, scene motions, transitions), run:
+
+```powershell
+ai-video-editor approve-plan mixed_media_demo
+ai-video-editor compose mixed_media_demo --deep
+```
+
+If no editing plan exists, create one first:
+
+```powershell
+ai-video-editor plan mixed_media_demo --style documentary --seed 12345
+ai-video-editor approve-plan mixed_media_demo
+ai-video-editor compose mixed_media_demo --deep
+```
+
+`compose` keeps a current, approved editing plan unchanged. For an intentional replacement, run `ai-video-editor compose mixed_media_demo --replan --style calm --seed 99` and then **approve the new plan and rerun compose**. A change to only an audio track or sidecar subtitle no longer forces video encoding. Burn-in subtitle changes require a new final video encode.
+
+Video-only cache identity changed to include corrected colorspace and burn-in behavior; the first upgraded compose may re-render. Standalone `audio` and `qa` reject stale or mismatched render checkpoints.
+
+See [Phase 1.10.2 release notes](RELEASE_NOTES_1.10.2.md) for fixes, regressions and caveats.
 
 ---
 
-## Hạn chế hiện tại
+## Historical Phase 1.9 instructions
 
-- Chưa có AI sinh ảnh, video hay giọng đọc; chưa có chuyển giọng nói thành phụ đề (speech-to-text).
-- Chưa có tự động hạ nhạc nền khi có giọng đọc (ducking) và chuẩn hóa độ lớn LUFS.
-- Chuỗi ảnh phải cùng FPS với đầu ra; chưa hỗ trợ cắt đoạn (trim) hay đổi tốc độ video clip.
-- Một số bản FFmpeg dựng từ nhánh git/nightly có chuỗi phiên bản không chuẩn và có thể bị từ chối ở bước kiểm tra phiên bản. Hãy dùng bản phát hành chính thức (ví dụ `7.1`, `9.0.2`).
-- Là công cụ render theo lô, không có xem trước thời gian thực.
+# AI Video Editor — Phase 1.9 (Image Sequence Engine)
+
+**New:** `image_sequence` scenes render a numbered series of PNG/JPG frames as animation and mix them with existing still-image scenes. A 90-frame sequence at 30 FPS becomes **exactly 3 seconds** of video. **No AI motion synthesis or interpolation** is performed.
+
+## Update from Phase 1.8 on Windows
+
+1. Back up your existing `projects` directory. Keep all your media, cached clips, and outputs.
+2. Extract this ZIP and copy `src`, `tests`, `docs`, `examples`, and `pyproject.toml` into your current repository. Do **not** overwrite `projects`.
+3. From the project root, run `py -m pip install -e .` then `py -m unittest discover -s tests -v`.
+4. The original `youtube_video_001` still uses still-image scene schema; no migrations are required.
+
+## New image-sequence example
+
+Copy `examples/storyboard_image_sequence.json` into `projects/ball_throw_demo/storyboard.json` after initializing with `ai-video-editor init ball_throw_demo --title "Ném bóng"`.
+
+Create folder `projects/ball_throw_demo/assets/sequences/throw_ball/` and put 90 identically sized numbered images inside:
+
+```text
+frame_0001.png
+frame_0002.png
+...
+frame_0090.png
+```
+
+Run:
+
+```powershell
+ai-video-editor validate ball_throw_demo
+ai-video-editor assets ball_throw_demo
+ai-video-editor plan ball_throw_demo --style documentary --seed 12345
+ai-video-editor timeline ball_throw_demo --use-plan
+ai-video-editor render ball_throw_demo --resume
+ai-video-editor audio ball_throw_demo
+ai-video-editor qa ball_throw_demo --deep
+```
+
+Outputs: `projects/ball_throw_demo/output/video_only.mp4` and `final.mp4`. The latter has silent AAC if no voice was supplied. To mix sequence and still-image scenes, add both kinds into the same storyboard using consecutive `order` fields; still scenes require audio, sequence scenes may omit it.
+
+**Compatibility:** Project output FPS must equal `sequence.fps`. Images cannot be missing or have mismatched dimensions. Use `image.fit_mode = cover` or `contain` (not `blur_fill`) for sequence projects. See [Phase 1.9 contract](docs/phase1-9-contract.md) for exact rules.
+
+**Tested:** 94 Python unit/integration tests PASS on Linux, including real FFmpeg sequence rendering, full cache reuse, silent AAC mux and mixed still + sequence rendering. **Windows 11 / FFmpeg 9 acceptance is pending.**
 
 ---
 
-## Tài liệu
+# AI Video Editor — Phase 1.8 (Integration QA)
 
-- `docs/phase1-*-contract.md`: hợp đồng kỹ thuật của từng phase phát triển.
-- `RELEASE_NOTES_*.md`: thay đổi của từng phiên bản.
-- Tài liệu kiến trúc kỹ thuật và hướng dẫn sử dụng chi tiết (`TECHNICAL_ARCHITECTURE`, `USER_GUIDE`).
+New read-only QA CLI validates the full project and actual MP4 media, writes `reports/integration_report.json`. Includes Phase 1.7 Windows RenderLock fix.
+
+```powershell
+py -m pip install -e .
+py -m unittest discover -s tests -v
+ai-video-editor qa youtube_video_001
+ai-video-editor qa youtube_video_001 --deep
+```
+
+- Default QA validates assets, plan, timeline freshness, video-only and final H.264/AAC files. It **does not render again**.
+- `--deep` additionally flags possible black-video and silence-during-voice intervals; these are warnings, not automatic errors.
+- Check result: `reports/integration_report.json`; exit code `0` = PASS, `1` = FAIL.
+- Requires `final.mp4` produced by `ai-video-editor audio PROJECT`.
+- Keep `projects` untouched when installing the updated source.
+- Full contract: `docs/phase1-8-contract.md`.
 
 ---
 
-## Giấy phép
+# AI Video Editor — Phase 1.7 (Checkpoint & Recovery)
 
-_Chưa xác định._ Hãy bổ sung giấy phép phù hợp trước khi công khai repository.
+**New features:** resumable scene + body/transition cache, durable progress manifest, verified reuse, interrupted-run recovery, render lock, and atomic final MP4. Preserves all Phase 1.1–1.6 features and FFmpeg 9 `-/filter_complex` compatibility. Phase 1.6 audio is unchanged.
 
-**Lưu ý về FFmpeg:** dự án gọi FFmpeg như một chương trình bên ngoài và không kèm FFmpeg trong mã nguồn. Các bản FFmpeg có `libx264` thuộc giấy phép GPL. Nếu phân phối phần mềm kèm file FFmpeg, bạn cần tuân thủ các điều khoản tương ứng.
+## Upgrade existing Windows project (IMPORTANT)
+
+1. Make a backup of your project folder, especially `projects/youtube_video_001`.
+2. Extract this archive to a new folder; it contains complete sources. Your original project assets are **not** bundled.
+3. Copy your entire original `projects/youtube_video_001` into the extracted new folder's `projects` directory, **or** copy `src`, `config`, `docs`, `scripts`, `tests`, `pyproject.toml` into the existing repository, preserving the original `projects` directory.
+4. Open PowerShell in the root folder and install: `py -m pip install -e .`
+5. Run tests: `py -m unittest discover -s tests -v`
+6. Render with `ai-video-editor render youtube_video_001 --resume`.
+
+> `--resume` is optional. The normal `render` command already resumes, except when `--force` is used. First 1.7 run reuses already existing Phase 1.5 scene clips, but **builds the new persistent body/transition checkpoints once**. From the second 1.7 run, all steps can be reused.
+
+## Outputs
+
+- `reports/render_checkpoint.json` — per-step checkpoint manifest, current render key, status and hashes.
+- `work/scenes/` — already existing scene clips (reused).
+- `work/checkpoints/<render-key>/` — persistent body and transition clips; do not delete during render.
+- `output/video_only.mp4` — protected MP4, never overwritten until staged output verifies.
+- `reports/render_report.json` — includes `cached_scenes`, `cached_segments`, and `cached_output`.
+
+## Commands
+
+```powershell
+ai-video-editor render youtube_video_001 --resume
+ai-video-editor audio youtube_video_001
+Get-Content projects/youtube_video_001/reports/render_checkpoint.json
+```
+
+Render from scratch (ignores cache):
+
+```powershell
+ai-video-editor render youtube_video_001 --force
+```
+
+## Verification
+
+```powershell
+py -m unittest discover -s tests -v
+ffprobe -v error -count_frames -show_entries stream=codec_name,nb_read_frames,avg_frame_rate,width,height -of json "projects/youtube_video_001/output/video_only.mp4"
+```
+
+Read [Phase 1.7 Contract](docs/phase1-7-contract.md) for cache invalidation, interruption recovery, limitations and file layout.
+
+## Previous feature notes
+
+# AI Video Editor — Phase 1.6 (Voice Engine)
+
+**Status:** Implemented, Linux smoke-tested, **pending acceptance on Windows 11 / FFmpeg 9.0.2**.
+
+Includes source and tests for the previously accepted Phase 1.1–1.5 features. Phase 1.5 includes the FFmpeg 9 compatible `-/filter_complex` hotfix.
+
+## New in Phase 1.6
+
+- Build sample-aligned PCM voice track from MP3/WAV per-scene narration.
+- Add precise silence before, between and after narration segments according to `timeline.json`.
+- Mux AAC-LC stereo into the already-rendered video, avoiding another image render.
+- Validate both MP4 streams and record `reports/audio_report.json`.
+- Detect missing media, stale timeline, mismatching decoded voice duration and invalid video-only input.
+- Atomic final MP4 output: intermediate `final.partial.mp4` only renamed on successful validation.
+
+**Deferred to Phase 3:** background music, music ducking, two-pass LUFS normalization, subtitles and `single_track` narration with alignment.
+
+## Install on Windows
+
+Prerequisites: Python >= 3.10, FFmpeg + FFprobe in PATH.
+
+Open PowerShell in this extracted folder:
+
+```powershell
+py -m pip install -e .
+py -m unittest discover -s tests -v
+```
+
+Expected: `Ran 75 tests` and `OK` (assuming required FFmpeg support for H.264 and MP3).
+
+## Test with a new project
+
+```powershell
+py scripts/create_demo_assets.py --project-id phase16_demo
+ai-video-editor assets phase16_demo
+ai-video-editor plan phase16_demo --style documentary --seed 12345
+ai-video-editor timeline phase16_demo --use-plan
+ai-video-editor render phase16_demo
+ai-video-editor audio phase16_demo
+```
+
+Artifacts:
+
+```text
+projects/phase16_demo/
+├── output/
+│   ├── video_only.mp4       # Phase 1.5: video-only (reusable)
+│   └── final.mp4            # Phase 1.6: H.264 + AAC voice
+├── work/audio/voice_mix.wav # PCM aligned to timeline
+└── reports/audio_report.json
+```
+
+The generated voices are synthetic tones for testing. With real narration, provide one WAV/MP3 file per scene as defined in the storyboard.
+
+**Important:** `audio` will not re-render video. In an existing Phase 1.5 project with correct `video_only.mp4`, simply run:
+
+```powershell
+ai-video-editor audio phase15_demo
+```
+
+This requires the same project under `projects/`, unchanged input assets, `timeline.json` and `editing_plan.json`.
+
+## Validate final video and audio
+
+```powershell
+ffprobe -v error -count_frames -show_entries stream=codec_type,codec_name,profile,pix_fmt,width,height,nb_read_frames,sample_rate,channels,color_space -of json "projects/phase16_demo/output/final.mp4"
+Get-Content "projects/phase16_demo/reports/audio_report.json"
+```
+
+Expected for the demo with documentary seed 12345: 10 scenes; **516 video frames**, 30 FPS, audio sample rate 48000 Hz, 2 channels and a single AAC-LC track. The report has `final_qa.aac_sample_difference` (may be nonzero due to AAC padding).
+
+## Validate in Windows Media Player
+
+1. Open `projects/phase16_demo/output/final.mp4`.
+2. Confirm video is visible, and you can hear all ten short tones in order.
+3. Confirm the video continues throughout and has no unexpected sound gaps other than the timeline's intentional pauses.
+4. Confirm `output/video_only.mp4` is unchanged, and `final.mp4` contains one audio track.
+
+## Troubleshooting
+
+- **`Video missing`:** run `ai-video-editor render phase16_demo` first.
+- **`Stale timeline`:** rebuild with `ai-video-editor timeline phase16_demo --use-plan`, then rerender video if affected.
+- **`decoded ... samples, timeline expects ...`:** run `ai-video-editor assets` and rebuild timeline. Source MP3 may have decode/timing variations; the engine refuses to clip real narration silently.
+- **Windows codec issue:** confirm H.264 yuv420p BT.709 and AAC-LC with FFprobe.
+- **Voice sounds too quiet/loud:** loudness processing is scheduled for Phase 3; audio levels follow the supplied files.
+
+## Unit tests
+
+`py -m unittest discover -s tests -v`
+
+See [Phase 1.6 Contract](docs/phase1-6-contract.md).
+
+---
+
+## Phase 1.10: Mixed Media, additional audio and subtitles
+
+AI Video Editor now accepts three scene types in one storyboard: `image` (Zoom/Pan), `image_sequence` (animation from sequential frames) and `video_clip` (existing MP4/MOV/MKV).
+
+**Single-command workflow** (once files have been placed into the project):
+
+```powershell
+ai-video-editor compose mixed_media_demo --deep
+```
+
+Or execute `assets`, `plan`, `timeline --use-plan`, `render --resume`, `audio` and `qa --deep` separately as in earlier phases.
+
+See `examples/storyboard_mixed_media.json` and `docs/phase1-10-contract.md` for complete input schema and migration steps. Additional global `audio_tracks` use absolute timeline start times; subtitle `mode` in `config.json` is `off`, `sidecar`, `burn_in`, or `both`. Original embedded sound in `video_clip` is intentionally omitted unless you supply it as a separate audio track.
+
+## Phase 1.10.1 — Audio embedded in video scenes
+
+Video clips with embedded audio now retain that audio by default, exactly aligned to
+`timeline.video_track[].start_frame` and linearly crossfaded over dissolve overlaps.
+No separate extraction or manual `start_seconds` is needed. Example:
+
+```json
+{
+  "scene_id": "003", "order": 3, "type": "video_clip",
+  "video": "assets/videos/scene_003.mp4", "narration": "",
+  "source_audio": {"enabled": true, "volume": 1.0}
+}
+```
+
+The `source_audio` object is optional: default is to use embedded audio if present.
+Set `enabled: false` to mute a clip; explicitly `true` requires an audio stream.
+**Remove manually added `scene_003.wav` audio tracks to avoid doubling the sound.**
+Run `ai-video-editor compose mixed_media_demo --deep` again to rebuild the final
+MP4, and see `reports/audio_report.json` → `source_video_audio` for sample offsets
+and fade lengths. Full contract: `docs/phase1-10-1-contract.md`.
+
+
+## Phase 1.10.3 — Precision & Cache Correctness
+
+See [release notes](RELEASE_NOTES_1.10.3.md) for implementation details, regression tests, and Windows upgrade instructions.
