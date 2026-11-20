@@ -60,6 +60,23 @@ def main(argv: list[str] | None = None) -> int:
     compose.add_argument('--seed', type=int)
     approve = cmd.add_parser('approve-plan', help='Explicitly approve existing current editing plan')
     approve.add_argument('project_id')
+    agent_init = cmd.add_parser('agent-init', help='Phase 2.1: create manual asset manifest from a structured brief')
+    agent_init.add_argument('project_id')
+    agent_init.add_argument('--brief', type=Path, required=True)
+    agent_init.add_argument('--replace', action='store_true')
+    agent_status = cmd.add_parser('agent-status', help='Phase 2.1: show missing assets and plan status')
+    agent_status.add_argument('project_id')
+    agent_bind = cmd.add_parser('agent-bind', help='Bind a locally supplied media or voice file')
+    agent_bind.add_argument('project_id')
+    agent_bind.add_argument('--scene', required=True)
+    agent_bind.add_argument('--kind', required=True, choices=['media','voice'])
+    agent_bind.add_argument('--file', required=True)
+    agent_approve = cmd.add_parser('agent-approve', help='Approve agent plan after assets are ready')
+    agent_approve.add_argument('project_id')
+    agent_compile = cmd.add_parser('agent-compile', help='Compile reviewed plan to Core storyboard.json')
+    agent_compile.add_argument('project_id')
+    agent_compile.add_argument('--replace-storyboard', action='store_true')
+    cmd.add_parser('agent-tools', help='List safe Phase 2.1 agent tools')
     cmd.add_parser('list', help='List local projects')
     args = parser.parse_args(argv)
     pm = ProjectManager(args.projects_dir, args.default_config)
@@ -175,6 +192,26 @@ def main(argv: list[str] | None = None) -> int:
                               'checks':qa['checks'], 'warnings':qa['warnings']},ensure_ascii=False,indent=2))
             if qa['status'] != 'PASS':
                 return 1
+        elif args.action in ('agent-init','agent-status','agent-bind','agent-approve','agent-compile','agent-tools'):
+            from .agent import (registry, create_manifest, load_manifest, missing_assets,
+                                bind_asset, approve_manifest, compile_storyboard)
+            if args.action == 'agent-tools':
+                payload=registry().describe()
+            else:
+                project=pm.load_project(args.project_id)
+                if args.action == 'agent-init':
+                    payload=create_manifest(project,read_json(args.brief),replace=args.replace)
+                elif args.action == 'agent-status':
+                    manifest=load_manifest(project)
+                    payload={'project_id':project.project_id,'status':manifest['status'],
+                             'missing_assets':missing_assets(project,manifest),'scenes':len(manifest['scenes'])}
+                elif args.action == 'agent-bind':
+                    payload=bind_asset(project,args.scene,args.kind,args.file)
+                elif args.action == 'agent-approve':
+                    payload=approve_manifest(project)
+                else:
+                    payload=compile_storyboard(project,replace_storyboard=args.replace_storyboard)
+            print(json.dumps(payload,ensure_ascii=False,indent=2))
         elif args.action == 'list':
             for pid in pm.list_projects():
                 print(pid)

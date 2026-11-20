@@ -1,0 +1,17 @@
+{
+  "title": "Khám phá đại dương",
+  "scenes": [
+    {
+      "scene_id": "001",
+      "type": "image",
+      "narration": "Dưới đại dương là một thế giới đầy bí ẩn.",
+      "prompt": "Documentary underwater landscape, deep blue ocean, cinematic light rays, 16:9"
+    },
+    {
+      "scene_id": "002",
+      "type": "video_clip",
+      "narration": "",
+      "prompt": "A slow cinematic underwater camera move through glowing coral, realistic, 16:9"
+    }
+  ]
+}
