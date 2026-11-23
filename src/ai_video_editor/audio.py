@@ -7,6 +7,7 @@ The frame/sample timeline is authoritative; no narration is trimmed or stretched
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import os
 import subprocess
@@ -162,6 +163,46 @@ def _srt_timestamp(seconds: float) -> str:
     return f'{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}'
 
 
+def wrap_cue(text: str, max_chars: int, max_lines: int) -> list[str]:
+    """Split one cue into pages of at most `max_lines` lines of `max_chars` characters.
+
+    Words are kept whole; a single longer token (e.g. Japanese without spaces) is cut.
+    """
+    tokens: list[str] = []
+    for word in text.split():
+        while len(word) > max_chars:
+            tokens.append(word[:max_chars])
+            word = word[max_chars:]
+        if word:
+            tokens.append(word)
+    lines: list[str] = []
+    current = ''
+    for token in tokens:
+        candidate = f'{current} {token}' if current else token
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            lines.append(current)
+            current = token
+    if current:
+        lines.append(current)
+    return ['\n'.join(lines[i:i + max_lines]) for i in range(0, len(lines), max_lines)] or ['']
+
+
+def _paged_cues(cue: dict[str, Any], max_chars: int, max_lines: int) -> list[tuple[float, float, str]]:
+    """Time each page proportionally to its length inside the original cue interval."""
+    pages = wrap_cue(cue['text'].replace('\r', '').strip(), max_chars, max_lines)
+    start, end = float(cue['start_seconds']), float(cue['end_seconds'])
+    weights = [max(1, len(page)) for page in pages]
+    total = sum(weights)
+    result, cursor = [], start
+    for index, (page, weight) in enumerate(zip(pages, weights)):
+        stop = end if index == len(pages) - 1 else start + (end - start) * sum(weights[:index + 1]) / total
+        result.append((cursor, stop, page))
+        cursor = stop
+    return result
+
+
 def prepare_subtitles(project: Project, timeline: dict[str, Any]) -> Path | None:
     """Author SRT from storyboard cues or import an SRT; never infer speech timing."""
     board = project.storyboard
@@ -201,11 +242,17 @@ def prepare_subtitles(project: Project, timeline: dict[str, Any]) -> Path | None
     else:
         lines = []
         end_of_video = timeline['total_duration_seconds']
+        settings = project.config['subtitles']
+        max_chars = int(settings.get('max_chars_per_line', 42))
+        max_lines = int(settings.get('max_lines', 2))
+        number = 0
         for index, cue in enumerate(cues, 1):
             if cue['end_seconds'] > end_of_video + 0.001:
                 raise AudioError(f'Subtitle {index} extends beyond the video')
-            text = cue['text'].replace('\r', '').strip()
-            lines.append(f'{index}\n{_srt_timestamp(cue["start_seconds"])} --> {_srt_timestamp(cue["end_seconds"])}\n{text}\n')
+            # Long cues are wrapped and, beyond max_lines, split into consecutive cues.
+            for start, stop, text in _paged_cues(cue, max_chars, max_lines):
+                number += 1
+                lines.append(f'{number}\n{_srt_timestamp(start)} --> {_srt_timestamp(stop)}\n{text}\n')
         content = '\n'.join(lines)
     partial = destination.with_suffix('.partial.srt')
     partial.write_text(content, encoding='utf-8')
@@ -271,6 +318,63 @@ def _source_video_audio_layers(project: Project, timeline: dict[str, Any], asset
     return inputs, filters, details
 
 
+def duck_filter(timeline: dict[str, Any], sample_rate: int, audio_cfg: dict[str, Any]) -> str | None:
+    """FFmpeg `volume` filter that lowers music by duck_depth_db while narration plays.
+
+    Narration intervals come from the timeline (exact samples), so ducking is
+    deterministic: gain ramps down over duck_attack_ms before each voice and back up
+    over duck_release_ms after it. Close intervals are merged to avoid pumping.
+    """
+    depth = float(audio_cfg.get('duck_depth_db', 0))
+    voices = timeline.get('voice_track', [])
+    if depth >= 0 or not voices:
+        return None
+    attack = float(audio_cfg.get('duck_attack_ms', 150)) / 1000
+    release = float(audio_cfg.get('duck_release_ms', 400)) / 1000
+    intervals: list[list[float]] = []
+    for voice in voices:
+        start, end = voice['start_sample'] / sample_rate, voice['end_sample'] / sample_rate
+        if intervals and start - intervals[-1][1] <= attack + release:
+            intervals[-1][1] = end
+        else:
+            intervals.append([start, end])
+    terms = []
+    for start, end in intervals:
+        rise = f'clip((t-{start - attack:.4f})/{attack:.4f},0,1)' if attack > 0 else f'gte(t,{start:.4f})'
+        fall = f'clip(({end + release:.4f}-t)/{release:.4f},0,1)' if release > 0 else f'lte(t,{end:.4f})'
+        terms.append(f'min({rise},{fall})')
+    amount = terms[0]
+    for term in terms[1:]:
+        amount = f'max({amount},{term})'
+    return f"volume='pow(10,{depth:.3f}*({amount})/20)':eval=frame"
+
+
+def measure_loudness_gain(path: Path, audio_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Gain (dB) that brings integrated loudness to loudness_target_lufs (EBU R128).
+
+    A plain gain keeps every sample in place (unlike dynamic loudnorm, which resamples),
+    so timeline sync is untouched. Peaks are then caught by the limiter.
+    """
+    target = audio_cfg.get('loudness_target_lufs')
+    if target is None:
+        return {'target_lufs': None, 'measured_lufs': None, 'gain_db': 0.0}
+    proc = subprocess.run(['ffmpeg','-hide_banner','-nostdin','-i',str(path),
+                           '-af',f'loudnorm=I={float(target)}:TP=-1.5:print_format=json','-f','null','-'],
+                          capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=1800)
+    if proc.returncode:
+        raise AudioError('Loudness measurement failed: ' + proc.stderr[-600:])
+    block = proc.stderr[proc.stderr.rfind('{'):proc.stderr.rfind('}') + 1]
+    try:
+        measured = float(json.loads(block)['input_i'])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise AudioError('Loudness measurement returned no integrated loudness') from exc
+    if not math.isfinite(measured) or measured < -70:
+        # Silence or near-silence: nothing meaningful to normalise.
+        return {'target_lufs': float(target), 'measured_lufs': None, 'gain_db': 0.0}
+    gain = max(-20.0, min(20.0, float(target) - measured))
+    return {'target_lufs': float(target), 'measured_lufs': round(measured, 2), 'gain_db': round(gain, 2)}
+
+
 def mux_project_audio(project: Project) -> dict[str, Any]:
     """Use Phase 1.5 video cache and Phase 1.3 timeline to build final.mp4."""
     check_ffmpeg(project)
@@ -302,38 +406,62 @@ def mux_project_audio(project: Project) -> dict[str, Any]:
     staged=output.with_name('final.partial.mp4')
     try:
         subtitle_path = prepare_subtitles(project, timeline)
-        tracks = project.storyboard.get('audio_tracks', [])
+        audio_cfg = project.config['audio']
+        sample_rate, channels = mix['sample_rate'], mix['channels']
+        total_samples = int(timeline['total_samples'])
+        # music_enabled=false mutes every background track without editing the storyboard.
+        tracks = project.storyboard.get('audio_tracks', []) if audio_cfg.get('music_enabled', True) else []
         inputs = ['-i',str(video), '-i',str(pcm)]
         for track in tracks:
             inputs.extend(['-i',str(ensure_inside(project.folder, track['file']))])
         source_inputs, source_filters, source_details = _source_video_audio_layers(
-            project, timeline, assets, mix['sample_rate'], mix['channels'], 2 + len(tracks))
+            project, timeline, assets, sample_rate, channels, 2 + len(tracks))
         inputs.extend(source_inputs)
+        total_seconds = total_samples / sample_rate
+        fade_in = float(audio_cfg.get('music_fade_in_seconds', 0))
+        fade_out = min(float(audio_cfg.get('music_fade_out_seconds', 0)), total_seconds)
+        duck = duck_filter(timeline, sample_rate, audio_cfg)
         mix_filter = []
         for i, track in enumerate(tracks):
-            delay = round(track['start_seconds'] * mix['sample_rate'])
-            volume = track['volume']
-            mix_filter.append(f'[{i+2}:a:0]aresample={mix["sample_rate"]},'
-                              f'aformat=channel_layouts={"stereo" if mix["channels"] == 2 else "mono"},'
-                              f'volume={volume},adelay={delay}S:all=1[layer{i}]')
+            delay = round(track['start_seconds'] * sample_rate)
+            chain = [f'aresample={sample_rate}',
+                     f'aformat=channel_layouts={"stereo" if channels == 2 else "mono"}',
+                     f'volume={track["volume"]}']
+            if fade_in > 0:
+                chain.append(f'afade=t=in:st=0:d={fade_in:.3f}')
+            chain.append(f'adelay={delay}S:all=1')
+            if fade_out > 0:
+                chain.append(f'afade=t=out:st={total_seconds - fade_out:.3f}:d={fade_out:.3f}')
+            if duck:
+                chain.append(duck)  # music dips under every narration interval
+            mix_filter.append(f'[{i+2}:a:0]' + ','.join(chain) + f'[layer{i}]')
         mix_filter.extend(source_filters)
+        mixed = pcm
         if tracks or source_details:
+            # Pass 1: mix all layers to float PCM (no clipping before loudness gain).
             layers = ''.join(f'[layer{i}]' for i in range(len(tracks)))
             layers += ''.join(f'[srcaudio{i}]' for i in range(len(source_details)))
             count = 1 + len(tracks) + len(source_details)
-            peak_db = float(project.config['audio']['true_peak_max_dbtp'])
-            limit = min(1.0, max(0.0625, 10 ** (peak_db / 20)))
             mix_filter.append(f'[1:a:0]{layers}amix=inputs={count}:duration=first:normalize=0,'
-                              f'atrim=end_sample={timeline["total_samples"]},asetpts=N/SR/TB,'
-                              f'alimiter=limit={limit:.8f}:level=0:latency=1[aout]')
-        audio_map = ['-map','[aout]'] if mix_filter else ['-map','1:a:0']
-        cmd = ['ffmpeg','-hide_banner','-nostdin','-loglevel','error','-y'] + inputs
-        if mix_filter:
-            cmd += ['-filter_complex',';'.join(mix_filter)]
-        cmd += ['-map','0:v:0'] + audio_map + ['-c:v','copy']
-        cmd += ['-c:a','aac','-profile:a','aac_low','-b:a','192k',
-                '-ar',str(mix['sample_rate']),'-ac',str(mix['channels']),
-                '-movflags','+faststart',str(staged)]
+                              f'atrim=end_sample={total_samples},asetpts=N/SR/TB[mixed]')
+            mixed = pcm.with_name('final_mix.wav')
+            _run(['ffmpeg','-hide_banner','-nostdin','-loglevel','error','-y'] + inputs +
+                 ['-filter_complex',';'.join(mix_filter),'-map','[mixed]','-c:a','pcm_f32le',
+                  '-ar',str(sample_rate),'-ac',str(channels),str(mixed)],
+                 timeout=3600, cwd=project.folder)
+        # Pass 2: loudness gain (sample-count preserving) + peak limiter, then mux.
+        loudness = measure_loudness_gain(mixed, audio_cfg)
+        peak_db = float(audio_cfg.get('true_peak_max_dbtp', -1.0))
+        limit = min(1.0, max(0.0625, 10 ** (peak_db / 20)))
+        final_filter = (f'[1:a:0]volume={loudness["gain_db"]:.3f}dB,'
+                        f'atrim=end_sample={total_samples},asetpts=N/SR/TB,'
+                        f'alimiter=limit={limit:.8f}:level=0:latency=1[aout]')
+        cmd = ['ffmpeg','-hide_banner','-nostdin','-loglevel','error','-y',
+               '-i',str(video),'-i',str(mixed),'-filter_complex',final_filter,
+               '-map','0:v:0','-map','[aout]','-c:v','copy',
+               '-c:a','aac','-profile:a','aac_low','-b:a','192k',
+               '-ar',str(sample_rate),'-ac',str(channels),
+               '-movflags','+faststart',str(staged)]
         _run(cmd,timeout=3600,cwd=project.folder)
         inspection=inspect_final(staged,timeline,project.config)
         os.replace(staged,output)
@@ -344,7 +472,10 @@ def mux_project_audio(project: Project) -> dict[str, Any]:
             'video':video_qa,'audio':mix,'final_qa':inspection,
             'audio_scope':'per_scene_voice_plus_tracks_plus_source_video_audio',
             'source_video_audio':source_details,
-            'additional_audio_tracks':len(project.storyboard.get('audio_tracks',[])),
+            'additional_audio_tracks':len(tracks),
+            'music_enabled':bool(project.config['audio'].get('music_enabled', True)),
+            'ducking':bool(duck and tracks),
+            'loudness':loudness,
             'subtitles':str(subtitle_path) if subtitle_path else None,
             'warnings':timeline.get('warnings',[])}
     atomic_write_json(project.folder/'reports'/'audio_report.json',report)

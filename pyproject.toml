@@ -20,4 +20,4 @@ ai-video-editor = "ai_video_editor.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"ai_video_editor.api" = ["static/index.html", "static/script-editor.html", "static/scene-planner.html", "static/asset-workspace.html", "static/render-studio.html", "static/api-settings.html", "static/help.html", "static/assets/*", "static/sidebar.css", "static/sidebar.js"]
+"ai_video_editor.api" = ["static/index.html", "static/script-editor.html", "static/scene-planner.html", "static/asset-workspace.html", "static/render-studio.html", "static/api-settings.html", "static/help.html", "static/sidebar.css", "static/sidebar.js"]

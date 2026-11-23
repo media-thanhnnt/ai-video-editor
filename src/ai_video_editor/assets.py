@@ -59,7 +59,7 @@ def _check_regular_file(path: Path, root: Path) -> None:
 def scan_assets(project: Project) -> dict[str, list[str]]:
     """Walk media directories, returning safe relative paths, sorted consistently."""
     result: dict[str, list[str]] = {}
-    for category in ('images', 'audio', 'sequences', 'videos', 'subtitles', 'music', 'fonts'):
+    for category in ('images', 'audio', 'sequences', 'videos', 'subtitles', 'music', 'fonts', 'overlays'):
         folder = project.folder / 'assets' / category
         found: list[str] = []
         if folder.exists():
@@ -237,7 +237,8 @@ def match_scene_assets(project: Project) -> list[dict[str, Any]]:
                            'video':scene['video'], 'audio':scene.get('audio')})
         else:
             result.append({'scene_id':scene['scene_id'], 'type':'image',
-                           'image':scene['image'], 'audio':scene['audio']})
+                           'image':scene['image'], 'audio':scene['audio'],
+                           'overlay':scene.get('overlay')})
     return result
 
 
@@ -255,6 +256,8 @@ def validate_assets(project: Project, *, write_report: bool = True) -> dict[str,
     for scene in match_scene_assets(project):
         if scene['type'] == 'image':
             references.setdefault(scene['image'], 'image')
+            if scene.get('overlay'):
+                references.setdefault(scene['overlay'], 'image')
         elif scene['type'] == 'video_clip':
             references.setdefault(scene['video'], 'video')
         else:
@@ -270,6 +273,7 @@ def validate_assets(project: Project, *, write_report: bool = True) -> dict[str,
         item: dict[str, Any] = {'status': 'FAIL', 'type': kind}
         try:
             path = _media_path(project, relative, kind=('sequences' if relative.startswith('assets/sequences/') else
+                                                               'overlays' if relative.startswith('assets/overlays/') else
                                                                'images' if kind == 'image' else
                                                                'videos' if kind == 'video' else
                                                                'subtitles' if kind == 'subtitle' else 'audio'))
@@ -292,6 +296,8 @@ def validate_assets(project: Project, *, write_report: bool = True) -> dict[str,
         base_paths = ([scene['image']] if scene['type']=='image' else
                       [scene['video']] if scene['type']=='video_clip' else scene['frames'])
         paths = [*base_paths, scene['audio']] if scene.get('audio') else list(base_paths)
+        if scene.get('overlay'):
+            paths.append(scene['overlay'])
         errors = [f'{relative}: {file_results[relative].get("error", "invalid")}'
                   for relative in paths if file_results[relative]['status'] != 'PASS']
         if scene['type'] == 'video_clip' and not errors:

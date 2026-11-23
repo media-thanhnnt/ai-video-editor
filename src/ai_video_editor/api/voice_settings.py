@@ -8,7 +8,13 @@ from __future__ import annotations
 from ..project import ValidationError, atomic_write_json, read_json
 
 OPENAI_VOICES = ('alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer')
-GEMINI_VOICES = ('Kore', 'Puck', 'Charon', 'Fenrir', 'Aoede', 'Zephyr')
+# All 30 prebuilt Gemini TTS voices (speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).
+# The first six keep their historical order so existing UIs/defaults stay stable.
+GEMINI_VOICES = ('Kore', 'Puck', 'Charon', 'Fenrir', 'Aoede', 'Zephyr',
+                 'Leda', 'Orus', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus',
+                 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi',
+                 'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima',
+                 'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat')
 FILENAME = 'voice_preferences.json'
 
 

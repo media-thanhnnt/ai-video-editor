@@ -76,7 +76,7 @@ def validate_config(raw: Any) -> dict[str, Any]:
         raise ValidationError('config.output.fps must be positive rational N/D')
     if output.get('video_codec') != 'h264' or output.get('audio_codec') != 'aac':
         raise ValidationError('Phase 1 requires video_codec=h264 and audio_codec=aac')
-    if data['image'].get('fit_mode') not in ('cover','contain','blur_fill'):
+    if data['image'].get('fit_mode') not in ('cover','contain','blur_fill','auto'):
         raise ValidationError('Unsupported image.fit_mode')
     for k in ('pad_head_seconds','pad_tail_seconds','min_scene_seconds'):
         n = data['timing'].get(k)
@@ -89,7 +89,62 @@ def validate_config(raw: Any) -> dict[str, Any]:
     if data['subtitles'].get('mode') not in ('off','sidecar','burn_in','both'):
         raise ValidationError('Invalid subtitles.mode')
     check_relpath(data['subtitles'].get('font_file'), 'subtitles.font_file')
+    _validate_optional_settings(data)
     return data
+
+
+# Defaults for settings added after a config file was created. Every key is optional
+# in config.json; a missing key behaves like these values (old projects keep working).
+QUALITY_CRF = {'very_high': 15, 'high': 18, 'medium': 21, 'low': 24}
+DEFAULT_ZOOM = {'subtle': 1.05, 'medium': 1.10, 'strong': 1.18}
+
+
+def _number(value: Any, label: str, low: float, high: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) \
+            or not low <= value <= high:
+        raise ValidationError(f'{label} must be a number between {low} and {high}')
+    return float(value)
+
+
+def _validate_optional_settings(data: dict[str, Any]) -> None:
+    if data['output'].get('quality', 'high') not in QUALITY_CRF:
+        raise ValidationError('config.output.quality must be very_high, high, medium or low')
+    motion = data['motion']
+    zoom = motion.get('zoom_factor', DEFAULT_ZOOM)
+    if not isinstance(zoom, dict) or set(zoom) != set(DEFAULT_ZOOM):
+        raise ValidationError('config.motion.zoom_factor needs subtle, medium and strong')
+    for name, value in zoom.items():
+        _number(value, f'config.motion.zoom_factor.{name}', 1.0, 1.5)
+    if motion.get('easing', 'ease_in_out') not in ('ease_in_out', 'linear'):
+        raise ValidationError('config.motion.easing must be ease_in_out or linear')
+    audio = data['audio']
+    if type(audio.get('music_enabled', True)) is not bool:
+        raise ValidationError('config.audio.music_enabled must be true or false')
+    _number(audio.get('duck_depth_db', 0), 'config.audio.duck_depth_db', -40, 0)
+    _number(audio.get('duck_attack_ms', 150), 'config.audio.duck_attack_ms', 0, 5000)
+    _number(audio.get('duck_release_ms', 400), 'config.audio.duck_release_ms', 0, 5000)
+    _number(audio.get('music_fade_in_seconds', 0), 'config.audio.music_fade_in_seconds', 0, 60)
+    _number(audio.get('music_fade_out_seconds', 0), 'config.audio.music_fade_out_seconds', 0, 60)
+    if audio.get('loudness_target_lufs') is not None:
+        _number(audio['loudness_target_lufs'], 'config.audio.loudness_target_lufs', -36, -5)
+    _number(audio.get('true_peak_max_dbtp', -1.0), 'config.audio.true_peak_max_dbtp', -24, 0)
+    subtitles = data['subtitles']
+    for key, low, high in (('max_chars_per_line', 8, 200), ('max_lines', 1, 6)):
+        value = subtitles.get(key, 42 if key == 'max_chars_per_line' else 2)
+        if type(value) is not int or not low <= value <= high:
+            raise ValidationError(f'config.subtitles.{key} must be an integer {low}..{high}')
+    _number(subtitles.get('safe_area_bottom_percent', 8), 'config.subtitles.safe_area_bottom_percent', 0, 40)
+    if type(data['planning'].get('use_ai', True)) is not bool:
+        raise ValidationError('config.planning.use_ai must be true or false')
+    retry = data['retry']
+    attempts = retry.get('render_max_attempts', 1)
+    if type(attempts) is not int or not 1 <= attempts <= 5:
+        raise ValidationError('config.retry.render_max_attempts must be 1..5')
+    backoff = retry.get('backoff_seconds', [])
+    if not isinstance(backoff, list):
+        raise ValidationError('config.retry.backoff_seconds must be a list of seconds')
+    for value in backoff:
+        _number(value, 'config.retry.backoff_seconds[]', 0, 600)
 
 
 SEQUENCE_PATTERNS = (
@@ -146,6 +201,13 @@ def validate_storyboard(raw: Any, *, project_id: str | None = None) -> dict[str,
         kind = scene.get('type', 'image')
         if kind not in ('image', 'image_sequence', 'video_clip'):
             raise ValidationError(f'scene {sid}: unsupported type {kind!r}')
+        if 'overlay' in scene:
+            # Optional static text/graphics layer composited after motion (Phase 2.5.1.7).
+            if kind != 'image':
+                raise ValidationError(f'scene {sid}: overlay is supported on image scenes only')
+            overlay = check_relpath(scene['overlay'], f'scene {sid}.overlay')
+            if not overlay.startswith('assets/overlays/') or not overlay.lower().endswith('.png'):
+                raise ValidationError(f'scene {sid}: overlay must be a PNG inside assets/overlays/')
         if kind == 'image':
             require_string(scene.get('narration'), f'scene {sid}.narration')
             check_relpath(scene.get('image'), f'scene {sid}.image')
@@ -277,7 +339,7 @@ class ProjectManager:
         staging = self.projects_dir / ('.creating-' + uuid.uuid4().hex)
         try:
             staging.mkdir()
-            for folder in ('assets/images','assets/audio','assets/sequences','assets/videos','assets/subtitles','assets/music','assets/fonts',
+            for folder in ('assets/images','assets/audio','assets/sequences','assets/videos','assets/subtitles','assets/music','assets/fonts','assets/overlays',
                            'subtitles','work/scenes','work/transitions','work/audio','output','reports'):
                 (staging / folder).mkdir(parents=True)
             atomic_write_json(staging / 'config.json', config)

@@ -80,8 +80,13 @@ class ApiLimitsRequest(BaseModel):
 
 class BindAssetRequest(BaseModel):
     scene_id: str = Field(min_length=1, max_length=64)
-    kind: str = Field(pattern='^(media|voice)$')
+    kind: str = Field(pattern='^(media|voice|overlay)$')
     file: str = Field(min_length=1, max_length=500)
+
+
+class OverlayRequest(BaseModel):
+    scene_ids: list[str] | None = None
+    bind: bool = True
 
 
 class RenderPreparationRequest(BaseModel):
@@ -828,6 +833,18 @@ def create_app(*, projects_dir: Path, default_config: Path, static_dir: Path | N
         return {'scene_id': scene_id, 'file': relative, 'manifest_status': result['status'],
                 'missing': missing_assets(project, result)}
 
+    @app.post('/api/projects/{project_id}/assets/overlays')
+    def generate_overlays_route(project_id: str, body: OverlayRequest):
+        """Render text overlay cards locally (no provider call) and bind them to the manifest."""
+        project = _get_project(project_id)
+        if jobs.active(project_id):
+            raise HTTPException(409, 'Wait for the current project job to finish')
+        try:
+            from ..overlay import generate_overlays
+            return generate_overlays(project, scene_ids=body.scene_ids, bind=body.bind)
+        except (ValidationError, OSError, ValueError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @app.post('/api/projects/{project_id}/assets/auto-bind')
     def auto_bind_route(project_id: str):
         project = _get_project(project_id)
@@ -1041,15 +1058,5 @@ def create_app(*, projects_dir: Path, default_config: Path, static_dir: Path | N
             raise HTTPException(404)
         return FileResponse(public / filename,
                             media_type='text/css' if filename.endswith('.css') else 'application/javascript')
-
-    @app.get('/assets/{filename:path}', include_in_schema=False)
-    def frontend_asset(filename: str):
-        # Only built frontend assets are exposed. Do not serve project files.
-        if not filename or '\\' in filename:
-            raise HTTPException(404)
-        target = (public / 'assets' / filename).resolve()
-        if not target.is_relative_to(public / 'assets') or not target.is_file():
-            raise HTTPException(404)
-        return FileResponse(target)
 
     return app

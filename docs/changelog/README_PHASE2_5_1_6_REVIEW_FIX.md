@@ -63,6 +63,8 @@ py -m unittest discover -s tests -v
 
 ### A.5 Phát hiện nhưng chưa sửa (cần quyết định hoặc ngoài phạm vi)
 
+> **Cập nhật:** 4 mục đầu tiên dưới đây đã được xử lý trong [Phase 2.5.1.7](README_PHASE2_5_1_7_FEATURES.md).
+
 - **Config không được dùng:** `audio.music_enabled`, `duck_*`, `music_fade_*`, `loudness_target_lufs`, `subtitles.max_chars_per_line`, `max_lines`, `safe_area_bottom_percent`, `planning.max_revisions`, `retry.*`. Không module nào đọc các khóa này, nên người dùng dễ tưởng đã có ducking, chuẩn hóa LUFS hay retry.
 - **Ảnh OpenAI 3:2 vẫn bị cắt khoảng 15,6% chiều cao khi đưa vào khung 16:9**, vì gpt-image không có kích thước 16:9. Nếu cần giữ trọn ảnh, có thể dùng `fit_mode: contain` hoặc thêm chế độ nền mờ cho ảnh tĩnh.
 - **Danh sách voice Gemini chỉ có 6 giọng**, trong khi Gemini TTS hiện có nhiều giọng hơn.

@@ -83,7 +83,7 @@ def load_manifest(project: Project) -> dict[str, Any]:
         if scene.get('scene_id') in ids:
             raise ValidationError('Duplicate agent manifest scene')
         ids.add(scene['scene_id'])
-        for field in ('media_file','voice_file'):
+        for field in ('media_file','voice_file','overlay_file'):
             if scene.get(field) is not None:
                 check_relpath(scene[field], field)
     return data
@@ -111,6 +111,9 @@ def missing_assets(project: Project, data: dict[str, Any]) -> list[str]:
             voice = scene.get('voice_file')
             if not voice or not ensure_inside(project.folder, voice).is_file():
                 missing.append(f'{sid}:voice')
+        overlay = scene.get('overlay_file')  # optional, but a bound file must exist
+        if overlay and not ensure_inside(project.folder, overlay).is_file():
+            missing.append(f'{sid}:overlay')
     return missing
 
 
@@ -122,25 +125,29 @@ def _approval_material(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def bind_asset(project: Project, scene_id: str, kind: str, relative_file: str) -> dict[str, Any]:
-    if kind not in ('media','voice'):
-        raise ValidationError('Asset kind must be media or voice')
+    if kind not in ('media','voice','overlay'):
+        raise ValidationError('Asset kind must be media, voice or overlay')
     data=load_manifest(project)
     scene=next((s for s in data['scenes'] if s['scene_id']==scene_id),None)
     if scene is None:
         raise ValidationError(f'Unknown scene {scene_id}')
     if kind=='media' and scene['type']=='image_sequence':
         raise ValidationError('Image sequences use sequence.frames_dir from the brief')
+    if kind=='overlay' and scene['type']!='image':
+        raise ValidationError('Overlays are supported on image scenes only')
     relative=check_relpath(relative_file, 'file')
-    root='assets/audio/' if kind=='voice' else ('assets/images/' if scene['type']=='image' else 'assets/videos/')
+    root=('assets/audio/' if kind=='voice' else 'assets/overlays/' if kind=='overlay' else
+          ('assets/images/' if scene['type']=='image' else 'assets/videos/'))
     if not relative.startswith(root):
         raise ValidationError(f'Asset must live under {root}')
     suffix=Path(relative).suffix.lower()
-    allowed=AUDIO_EXTENSIONS if kind=='voice' else (IMAGE_EXTENSIONS if scene['type']=='image' else {'.mp4','.mov','.mkv'})
+    allowed=(AUDIO_EXTENSIONS if kind=='voice' else {'.png'} if kind=='overlay' else
+             (IMAGE_EXTENSIONS if scene['type']=='image' else {'.mp4','.mov','.mkv'}))
     if suffix not in allowed:
         raise ValidationError(f'Unsupported {kind} extension: {suffix}')
     if not ensure_inside(project.folder, relative).is_file():
         raise ValidationError(f'Asset not found: {relative}')
-    field = 'voice_file' if kind=='voice' else 'media_file'
+    field = {'voice':'voice_file','overlay':'overlay_file'}.get(kind,'media_file')
     if scene.get(field) == relative:
         return data  # Idempotent: no need to invalidate a compiled storyboard.
     scene[field] = relative
@@ -173,6 +180,8 @@ def compile_storyboard(project: Project, *, replace_storyboard: bool = False) ->
         item={'scene_id':s['scene_id'],'order':index,'type':kind,'narration':s['narration']}
         if kind=='image':
             item['image']=s['media_file']; item['audio']=s['voice_file']
+            if s.get('overlay_file'):
+                item['overlay']=s['overlay_file']
         elif kind=='image_sequence':
             item['sequence']=copy.deepcopy(s['sequence'])
             if s.get('voice_file'):

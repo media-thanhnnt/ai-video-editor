@@ -1,6 +1,6 @@
 # Latest hotfix: Phase 2.5.1.3
 
-For provider API key isolation, Editing Plan protection, and review fixes, see **[README_PHASE2_5_1_3_REVIEW_FIX.md](README_PHASE2_5_1_3_REVIEW_FIX.md)**.
+For provider API key isolation, Editing Plan protection, and review fixes, see **[README_PHASE2_5_1_3_REVIEW_FIX.md](docs/changelog/README_PHASE2_5_1_3_REVIEW_FIX.md)**.
 
 # AI Video Editor
 
@@ -919,7 +919,7 @@ Newest first.
 **2.4.2 — Script Editor GUI.**
 
 **2.4.1 — Local dashboard**
-- FastAPI on loopback, zero-build dashboard, React/Vite source in `frontend/`.
+- FastAPI on loopback, zero-build dashboard (static HTML; the early React/Vite prototype was removed in 2.5.1.7).
 
 **2.3 — AI scene planner.**
 

@@ -113,6 +113,8 @@ def _timeline_asset_keys(project: Project) -> set[str]:
         kind = scene.get('type', 'image')
         if kind == 'image':
             keys.add(scene['image'])
+            if scene.get('overlay'):
+                keys.add(scene['overlay'])  # a changed overlay must re-render the scene
         elif kind == 'video_clip':
             keys.add(scene['video'])
         else:

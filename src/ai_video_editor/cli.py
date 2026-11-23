@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     agent_bind = cmd.add_parser('agent-bind', help='Bind a locally supplied media or voice file')
     agent_bind.add_argument('project_id')
     agent_bind.add_argument('--scene', required=True)
-    agent_bind.add_argument('--kind', required=True, choices=['media','voice'])
+    agent_bind.add_argument('--kind', required=True, choices=['media','voice','overlay'])
     agent_bind.add_argument('--file', required=True)
     agent_approve = cmd.add_parser('agent-approve', help='Approve agent plan after assets are ready')
     agent_approve.add_argument('project_id')
@@ -127,6 +127,10 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument('project_id')
         if name in ('agent-scene-export','agent-scene-apply'):
             sp.add_argument('--replace',action='store_true')
+    overlay_cmd = cmd.add_parser('overlay-generate', help='Render text overlay cards from Script "TEXT OVERLAY:" sections (local, free) and bind them')
+    overlay_cmd.add_argument('project_id')
+    overlay_cmd.add_argument('--scenes', help='Comma-separated scene IDs (default: all with overlay text)')
+    overlay_cmd.add_argument('--no-bind', action='store_true', help='Only write PNG files; do not bind')
     prompt_cmd = cmd.add_parser('agent-asset-prompts', help='Print or export image/video/voice prompts; no API charges')
     prompt_cmd.add_argument('project_id')
     prompt_cmd.add_argument('--format', choices=['markdown', 'json'], default='markdown')
@@ -230,6 +234,12 @@ def main(argv: list[str] | None = None) -> int:
             application = create_app(projects_dir=args.projects_dir, default_config=args.default_config)
             print(f'AI Video Editor GUI: http://{args.host}:{args.port}', flush=True)
             uvicorn.run(application, host=args.host, port=args.port)
+        elif args.action == 'overlay-generate':
+            from .overlay import generate_overlays
+            project = pm.load_project(args.project_id)
+            ids = [s.strip() for s in args.scenes.split(',') if s.strip()] if args.scenes else None
+            print(json.dumps(generate_overlays(project, scene_ids=ids, bind=not args.no_bind),
+                             ensure_ascii=False, indent=2))
         elif args.action == 'agent-asset-prompts':
             from .agent.asset_workflow import make_prompt_pack, render_prompt_markdown
             pack = make_prompt_pack(pm.load_project(args.project_id))

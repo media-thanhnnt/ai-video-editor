@@ -72,7 +72,10 @@ def make_prompt_pack(project):
         sid = item['scene_id']
         suggestion = planned.get(sid, {})
         kind = suggestion.get('media_type', item['type'])
-        prompt = suggestion.get('asset_prompt_en', item['prompt'])
+        # The "TEXT OVERLAY:" section is rendered locally as a card (overlay-generate);
+        # sending it to an image model only makes it paint (often wrong) text.
+        from ..overlay import split_prompt
+        prompt = split_prompt(suggestion.get('asset_prompt_en', item['prompt']))[0]
         narration = item['narration']
         scenes.append({
             'scene_id': sid, 'media_type': kind,

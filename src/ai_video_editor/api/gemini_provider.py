@@ -99,7 +99,8 @@ def generate_asset(kind,prompt,model,voice='Kore',*,projects_dir=None,aspect_rat
         raise ValidationError('Gemini returned no PNG/JPEG image')
     if kind=='audio':
         if model not in allowed.get('audio',{}).get('gemini',[]):raise ValidationError('Unsupported Gemini TTS model')
-        if voice not in ('Kore','Puck','Charon','Fenrir','Aoede','Zephyr'):raise ValidationError('Unsupported Gemini voice')
+        from .voice_settings import GEMINI_VOICES
+        if voice not in GEMINI_VOICES:raise ValidationError('Unsupported Gemini voice')
         res=request_model(model,[{'text':prompt}],{'responseModalities':['AUDIO'],'speechConfig':{'voiceConfig':{'prebuiltVoiceConfig':{'voiceName':voice}}}},projects_dir=projects_dir)
         for item in parts_of(res):
             if not isinstance(item, dict):

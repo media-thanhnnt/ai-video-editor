@@ -92,9 +92,15 @@ def bind_generated(project):
     return {'bound': completed, 'missing': missing_assets(project, current), 'manifest': current}
 
 
-def prepare_render(project, *, config_path: Path, approve: bool = False, use_ai_plan: bool = True,
+def prepare_render(project, *, config_path: Path, approve: bool = False, use_ai_plan: bool | None = None,
                    replace_stale_plan: bool = False):
-    """Never approve editing decisions implicitly: approval is a separate explicit UI click."""
+    """Never approve editing decisions implicitly: approval is a separate explicit UI click.
+
+    use_ai_plan=None follows config.planning.use_ai: false forces the rule-based plan
+    even when an approved AI Scene Plan exists.
+    """
+    if use_ai_plan is None:
+        use_ai_plan = bool(project.config['planning'].get('use_ai', True))
     manifest = load_manifest(project)
     missing = missing_assets(project, manifest)
     if missing:

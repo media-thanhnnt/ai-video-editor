@@ -12,6 +12,7 @@ import json
 import math
 import os
 import subprocess
+import time
 from contextlib import contextmanager
 from fractions import Fraction
 from pathlib import Path
@@ -23,7 +24,8 @@ from PIL import Image, ImageOps, ImageFilter
 
 from .assets import validate_assets
 from .planner import validate_editing_plan, require_approved_plan
-from .project import Project, ValidationError, atomic_write_json, ensure_inside, read_json
+from .project import (Project, ValidationError, atomic_write_json, ensure_inside, read_json,
+                      DEFAULT_ZOOM, QUALITY_CRF)
 from .timeline import build_timeline, validate_timeline
 from .ffmpeg_support import check_ffmpeg, complex_script_args
 
@@ -69,10 +71,26 @@ def verify_video(path: Path, frames: int, width: int, height: int, fps: Fraction
             'width':width,'height':height, 'color_space':s.get('color_space')}
 
 
+AUTO_FIT_TOLERANCE = 0.03  # aspect mismatch (relative) that cover may crop without losing content
+
+
+def _resolve_fit(mode: str, image_width: int, image_height: int, width: int, height: int) -> str:
+    """'auto' = cover when the aspect ratio (nearly) matches, otherwise blur_fill.
+
+    Example: a 1536x1024 (3:2) image in a 16:9 frame would lose 15.6% of its height
+    with cover; auto keeps the whole picture over a blurred background instead.
+    """
+    if mode != 'auto':
+        return mode
+    mismatch = abs((image_width / image_height) / (width / height) - 1)
+    return 'cover' if mismatch <= AUTO_FIT_TOLERANCE else 'blur_fill'
+
+
 def _prepare_source(path: Path, width: int, height: int, factor: int, mode: str) -> np.ndarray:
     tw, th = width * factor, height * factor
     with Image.open(path) as opened:
         image = ImageOps.exif_transpose(opened).convert('RGB')
+    mode = _resolve_fit(mode, image.width, image.height, width, height)
     if mode == 'cover':
         canvas = ImageOps.fit(image, (tw,th), method=Image.Resampling.LANCZOS)
     elif mode == 'contain':
@@ -90,19 +108,64 @@ def _prepare_source(path: Path, width: int, height: int, factor: int, mode: str)
     return np.asarray(canvas, dtype=np.uint8)
 
 
+def _load_overlay(path: Path, width: int, height: int) -> np.ndarray:
+    """RGBA overlay → premultiplied float layer (H, W, 4): rgb*alpha and 1-alpha.
+
+    The overlay is stretched to the output size; create it at the output resolution
+    (overlay-generate does) to avoid any resampling.
+    """
+    with Image.open(path) as opened:
+        layer = opened.convert('RGBA')
+    if layer.size != (width, height):
+        layer = layer.resize((width, height), Image.Resampling.LANCZOS)
+    rgba = np.asarray(layer, dtype=np.float32) / 255.0
+    alpha = rgba[..., 3:4]
+    return np.concatenate([rgba[..., :3] * alpha * 255.0, 1.0 - alpha], axis=2)
+
+
+def _composite(pixels: np.ndarray, overlay: np.ndarray) -> np.ndarray:
+    blended = pixels.astype(np.float32) * overlay[..., 3:4] + overlay[..., :3]
+    return np.clip(blended + 0.5, 0, 255).astype(np.uint8)
+
+
 def _smoothstep(t: float) -> float:
     return t*t*(3-2*t)
 
 
+def _crf(cfg: dict[str, Any]) -> int:
+    """config.output.quality → x264 CRF (high = 18, the historical fixed value)."""
+    return QUALITY_CRF[cfg['output'].get('quality', 'high')]
+
+
+def _motion_settings(cfg: dict[str, Any]) -> tuple[dict[str, float], str]:
+    motion = cfg.get('motion', {})
+    zoom = {k: float(v) for k, v in motion.get('zoom_factor', DEFAULT_ZOOM).items()}
+    return zoom, motion.get('easing', 'ease_in_out')
+
+
+def _motion_key(cfg: dict[str, Any], intensity: str | None = None) -> dict[str, Any]:
+    """Extra cache-key material, empty for default settings so existing caches stay valid."""
+    zoom, easing = _motion_settings(cfg)
+    if intensity is not None:
+        changed = zoom[intensity] != DEFAULT_ZOOM[intensity]
+        return {'zoom': zoom[intensity], 'easing': easing} if changed or easing != 'ease_in_out' else {}
+    if zoom != DEFAULT_ZOOM or easing != 'ease_in_out':
+        return {'zoom_factor': zoom, 'easing': easing}
+    return {}
+
+
 def motion_frame(source: np.ndarray, kind: str, intensity: str, frame: int,
-                 total: int, width: int, height: int) -> np.ndarray:
+                 total: int, width: int, height: int, *,
+                 zoom_factors: dict[str, float] | None = None,
+                 easing: str = 'ease_in_out') -> np.ndarray:
     """Inverse affine subpixel sample from fixed high-res source; no cumulative motion."""
     if kind not in ('static', 'zoom_in','zoom_out','pan_left','pan_right'):
         raise RenderError(f'Unsupported motion: {kind}')
     if intensity not in ('subtle','medium','strong') or total <= 0 or not 0 <= frame < total:
         raise RenderError('Invalid intensity or frame index')
-    ratio = {'subtle':1.05,'medium':1.10,'strong':1.18}[intensity]
-    u = _smoothstep(frame/(total-1)) if total>1 else 0.0
+    ratio = (zoom_factors or DEFAULT_ZOOM)[intensity]
+    progress = frame/(total-1) if total>1 else 0.0
+    u = progress if easing == 'linear' else _smoothstep(progress)
     if kind == 'static':
         zoom=1.0
     elif kind == 'zoom_in':
@@ -129,7 +192,9 @@ def motion_frame(source: np.ndarray, kind: str, intensity: str, frame: int,
 
 
 def _encode_scene(source: np.ndarray, destination: Path, kind: str, intensity: str,
-                  frames: int, width: int, height: int, fps: Fraction) -> None:
+                  frames: int, width: int, height: int, fps: Fraction, *,
+                  zoom_factors: dict[str, float] | None = None, easing: str = 'ease_in_out',
+                  overlay: np.ndarray | None = None) -> None:
     destination.parent.mkdir(parents=True,exist_ok=True)
     cmd=['ffmpeg','-hide_banner','-nostdin','-loglevel','error','-y','-f','rawvideo',
          '-pixel_format','rgb24','-video_size',f'{width}x{height}', '-framerate',
@@ -142,7 +207,12 @@ def _encode_scene(source: np.ndarray, destination: Path, kind: str, intensity: s
     try:
         assert proc.stdin is not None
         for i in range(frames):
-            proc.stdin.write(motion_frame(source,kind,intensity,i,frames,width,height).tobytes())
+            pixels = motion_frame(source,kind,intensity,i,frames,width,height,
+                                  zoom_factors=zoom_factors,easing=easing)
+            if overlay is not None:
+                # Text/graphics layer is composited AFTER motion: it never zooms or pans.
+                pixels = _composite(pixels, overlay)
+            proc.stdin.write(pixels.tobytes())
         proc.stdin.close()
         assert proc.stderr is not None
         stderr=proc.stderr.read().decode('utf-8','replace')
@@ -405,9 +475,24 @@ def render_project(project: Project, *, output_file: Path | None = None,
     work=project.folder/'work'
     scenes_dir=work/'scenes'; seg_dir=work/'segments'
     scenes_dir.mkdir(parents=True,exist_ok=True);seg_dir.mkdir(parents=True,exist_ok=True)
-    with _render_lock(work):
-        return _render_project_locked(project, plan, timeline, report, cfg, w, h, factor, fps,
-                                      tracks, result_file, scenes_dir, seg_dir, force)
+    # config.retry: re-run only the encoding stage (validation above is deterministic and is
+    # never retried). Completed scene clips and segments are reused, so a retry is cheap.
+    attempts = int(cfg['retry'].get('render_max_attempts', 1))
+    backoff = [float(v) for v in cfg['retry'].get('backoff_seconds', [])]
+    for attempt in range(1, attempts + 1):
+        try:
+            with _render_lock(work):
+                return _render_project_locked(project, plan, timeline, report, cfg, w, h, factor, fps,
+                                              tracks, result_file, scenes_dir, seg_dir, force)
+        except RenderError as exc:
+            if attempt >= attempts:
+                raise
+            wait = backoff[min(attempt - 1, len(backoff) - 1)] if backoff else 0.0
+            print(f'  render attempt {attempt}/{attempts} failed: {str(exc)[:300]}; '
+                  f'retrying in {wait:g}s', flush=True)
+            time.sleep(wait)
+            force = False  # keep everything that was already verified
+    raise RenderError('Render failed')  # unreachable; keeps type checkers satisfied
 
 
 def compute_render_identity(project: Project, plan: dict[str, Any],
@@ -422,6 +507,8 @@ def compute_render_identity(project: Project, plan: dict[str, Any],
         kind = scene.get('type','image')
         if kind == 'image':
             visuals.add(scene['image'])
+            if scene.get('overlay'):
+                visuals.add(scene['overlay'])
         elif kind == 'video_clip':
             visuals.add(scene['video'])
         else:
@@ -437,9 +524,19 @@ def compute_render_identity(project: Project, plan: dict[str, Any],
             if board.get('subtitle_file') else None),
             'font_hash':(compute_input_hashes({'font':ensure_inside(project.folder,font_file)})['font']
                          if font_file and ensure_inside(project.folder,font_file).is_file() else None),
-            'subtitle_config':cfg['subtitles']}
+            'subtitle_config':cfg['subtitles'],
+            # 2.5.1.7: MarginV from safe_area_bottom_percent + wrapped cues change burned pixels.
+            'style_version':'2.5.1.7'}
     # Notably absent: input audio hashes, voice content, audio tracks, sidecar-only subtitles.
+    # Settings added in 2.5.1.7 join the identity only when they differ from the
+    # historical behaviour, so an unchanged project keeps its render checkpoint.
+    extra = {}
+    if _motion_key(cfg):
+        extra['motion_settings'] = _motion_key(cfg)
+    if _crf(cfg) != QUALITY_CRF['high']:
+        extra['crf'] = _crf(cfg)
     return _digest({
+        **extra,
         'checkpoint_version': CHECKPOINT_VERSION, 'assembly_version':'1.10.2',
         'image_motion_version':(IMAGE_MOTION_CACHE_VERSION if any(
             scene.get('type','image') == 'image' for scene in project.storyboard['scenes']) else None),
@@ -496,9 +593,14 @@ def _render_project_locked(project: Project, plan: dict[str, Any], timeline: dic
                                'fps':str(fps),'fit':cfg['image']['fit_mode']})
             else:
                 path=ensure_inside(project.folder, scene['image'])
-                key=_digest({'engine':IMAGE_MOTION_CACHE_VERSION,'image_hash':report['input_hashes'][scene['image']],
-                             'motion':kind,'intensity':intensity,'frames':track['duration_frames'],
-                             'resolution':[w,h],'fps':str(fps),'factor':factor,'fit':cfg['image']['fit_mode']})
+                material={'engine':IMAGE_MOTION_CACHE_VERSION,'image_hash':report['input_hashes'][scene['image']],
+                          'motion':kind,'intensity':intensity,'frames':track['duration_frames'],
+                          'resolution':[w,h],'fps':str(fps),'factor':factor,'fit':cfg['image']['fit_mode']}
+                # New fields only when used, so caches of unchanged projects stay valid.
+                material.update(_motion_key(cfg, intensity))
+                if scene.get('overlay'):
+                    material['overlay_hash']=report['input_hashes'][scene['overlay']]
+                key=_digest(material)
             clip=scenes_dir/f'{scene["scene_id"]}_{key[:16]}.mkv'
             if not force and _use_cached_video(clip, track['duration_frames'], w, h, fps):
                 reuse+=1
@@ -513,7 +615,11 @@ def _render_project_locked(project: Project, plan: dict[str, Any], timeline: dic
                         _encode_video_scene(project,scene,part,track['duration_frames'],w,h,fps,cfg['image']['fit_mode'])
                     else:
                         img=_prepare_source(path,w,h,factor,cfg['image']['fit_mode'])
-                        _encode_scene(img,part,kind,intensity,track['duration_frames'],w,h,fps)
+                        zoom,easing=_motion_settings(cfg)
+                        layer=(_load_overlay(ensure_inside(project.folder,scene['overlay']),w,h)
+                               if scene.get('overlay') else None)
+                        _encode_scene(img,part,kind,intensity,track['duration_frames'],w,h,fps,
+                                      zoom_factors=zoom,easing=easing,overlay=layer)
                     verify_video(part,track['duration_frames'],w,h,fps)
                     os.replace(part,clip)
                 finally:
@@ -585,6 +691,9 @@ def _render_project_locked(project: Project, plan: dict[str, Any], timeline: dic
             subtitle_path = prepare_subtitles(project, timeline)
             if subtitle_path is not None and cfg['subtitles']['mode'] in ('burn_in','both'):
                 subtitle_filter = 'subtitles=filename=output/subtitles.srt'
+                # libass renders SRT on a 288-line script canvas; MarginV is in those units.
+                safe = float(cfg['subtitles'].get('safe_area_bottom_percent', 8))
+                styles = [f'MarginV={round(288 * safe / 100)}']
                 font_path = cfg['subtitles'].get('font_file')
                 if font_path and ensure_inside(project.folder,font_path).is_file():
                     from PIL import ImageFont
@@ -598,7 +707,9 @@ def _render_project_locked(project: Project, plan: dict[str, Any], timeline: dic
                     font_dir = font.parent.relative_to(project.folder.resolve()).as_posix()
                     if any(ch in font_dir for ch in "\\':,;[]"):  # safe libavfilter syntax
                         raise RenderError("Subtitle font directory contains unsupported FFmpeg characters")
-                    subtitle_filter += ":fontsdir=" + font_dir + ":force_style='FontName=" + family + "'"
+                    subtitle_filter += ":fontsdir=" + font_dir
+                    styles.insert(0, 'FontName=' + family)
+                subtitle_filter += ":force_style='" + ','.join(styles) + "'"
                 vf.append(subtitle_filter)
             vf.append(
                 'scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,' 
@@ -620,7 +731,7 @@ def _render_project_locked(project: Project, plan: dict[str, Any], timeline: dic
                 cmd.extend(complex_script_args(script, check_ffmpeg(project)) + ['-map','[out]',
                      '-an','-r',f'{fps.numerator}/{fps.denominator}','-fps_mode','cfr',
                      '-frames:v',str(timeline['total_frames']),'-c:v','libx264',
-                     '-preset',str(cfg['output']['encoder_preset']),'-crf','18',
+                     '-preset',str(cfg['output']['encoder_preset']),'-crf',str(_crf(cfg)),
                      '-profile:v','high','-pix_fmt','yuv420p',
                      '-x264-params','colorprim=bt709:transfer=bt709:colormatrix=bt709:range=tv',
                      '-color_primaries','bt709','-color_trc','bt709','-colorspace','bt709','-color_range','tv',
