@@ -264,7 +264,7 @@ def build_timeline(project: Project, *, asset_report: dict[str, Any] | None = No
         'generated_utc': datetime.now(timezone.utc).isoformat(),
         'time_base': {'fps': f'{fps.numerator}/{fps.denominator}', 'audio_sample_rate': sample_rate},
         'resolution': {'width': cfg['output']['width'], 'height': cfg['output']['height']},
-        'planning_source': 'rule_based' if editing_plan is not None else 'phase1.3_provisional_rule',
+        'planning_source': editing_plan['plan_meta']['source'] if editing_plan is not None else 'phase1.3_provisional_rule',
         'planning_cache_key': editing_plan['plan_meta']['cache_key'] if editing_plan is not None else None,
         'video_track': video_track, 'voice_track': voice_track,
         'intro': {'type': cfg['transitions']['intro'], 'duration_frames': intro},

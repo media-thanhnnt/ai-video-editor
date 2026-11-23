@@ -22,6 +22,24 @@ BRIEF_NAME = 'agent_scene_brief.json'
 PROMPT_VERSION = 'ai-scene-v2.3.0'
 ALLOWED_MEDIA = {'image', 'video_clip'}
 
+DEFAULT_SCENE_INSTRUCTIONS = (
+    'You are an assistant video scene editor. Propose media types, cinematic motions, transitions, '
+    'and brief English media prompts for the approved script. Do NOT fabricate existing files. '
+    'Use image or video_clip only. Motion on video_clip MUST be static. '
+    'The last scene must have transition none with null length; other none transitions also have null length. '
+    'Durations are approximate and may not match real voice or media. '
+    'Only propose; user review is required.'
+)
+
+
+def scene_instructions(value: str | None = None) -> str:
+    if value is None:
+        return DEFAULT_SCENE_INSTRUCTIONS
+    if not isinstance(value, str) or not 10 <= len(value.strip()) <= 12000:
+        raise ValidationError('Scene Plan instructions must be 10..12000 characters')
+    return value.strip()
+
+
 
 def _approved_script(project: Project) -> dict[str, Any]:
     draft = load_script_draft(project)
@@ -89,33 +107,32 @@ def validate_proposal(content: Any, script: dict[str, Any]) -> dict[str, Any]:
 
 def generate_openai_scene_plan(script: dict[str, Any], *, model: str='gpt-4.1-mini',
                                api_key: str | None=None, opener: Callable[...,Any]|None=None,
-                               timeout: int=120) -> tuple[dict[str,Any],dict[str,Any]]:
-    key=api_key or os.environ.get('OPENAI_API_KEY')
+                               timeout: int=120, base_url: str='https://api.openai.com/v1',
+                               instructions: str | None = None) -> tuple[dict[str,Any],dict[str,Any]]:
+    key=(api_key if api_key is not None else (os.environ.get('OPENAI_API_KEY') if base_url.rstrip('/') == 'https://api.openai.com/v1' else None))
     if not key:
         raise ValidationError('OPENAI_API_KEY missing; use --import-json for offline mode')
     body={
         'model':model, 'store':False,
-        'instructions':('You are an assistant video scene editor. Propose media types, cinematic motions, transitions, '
-                        'and brief English media prompts for the approved script. Do NOT fabricate existing files. '
-                        'Use image or video_clip only. Motion on video_clip MUST be static. '
-                        'The last scene must have transition none with null length; other none transitions also have null length. '
-                        'Durations are approximate and may not match real voice or media. '
-                        'Only propose; user review is required.'),
+        'instructions':scene_instructions(instructions),
         'input':json.dumps(script,ensure_ascii=False),
         'text':{'format':{'type':'json_schema','name':'scene_plan','strict':True,'schema':scene_schema()}},
     }
-    req=request.Request('https://api.openai.com/v1/responses',data=json.dumps(body,ensure_ascii=False).encode(),
+    req=request.Request(base_url.rstrip('/') + '/responses',data=json.dumps(body,ensure_ascii=False).encode(),
                         headers={'Authorization':f'Bearer {key}','Content-Type':'application/json'},method='POST')
     try:
         with (opener or request.urlopen)(req,timeout=timeout) as resp:
-            payload=json.loads(resp.read())
+            raw=resp.read()
     except error.HTTPError as exc:
         raise ValidationError(f'OpenAI HTTP {exc.code}; check model, key and quota') from exc
     except (error.URLError,OSError,TimeoutError) as exc:
         raise ValidationError(f'OpenAI connection failed: {type(exc).__name__}') from exc
     try:
+        payload=json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError('response payload must be an object')
         result=json.loads(_extract_response_text(payload))
-    except (ValueError,KeyError,TypeError) as exc:
+    except (ValueError,KeyError,TypeError,AttributeError) as exc:
         raise ValidationError('Invalid OpenAI scene-plan JSON') from exc
     validate_proposal(result,script)
     usage=payload.get('usage') or {}
@@ -175,32 +192,41 @@ def export_scene_brief(project:Project,*,replace:bool=False) -> dict[str,Any]:
     return {'project_id':project.project_id,'file':str(path),'scenes':len(brief['scenes']),'status':'BRIEF_READY'}
 
 
+def build_scene_editing_plan(project: Project) -> dict[str, Any]:
+    """Generate/validate AI editing decisions without touching the on-disk plan."""
+    doc = load_scene_plan(project, approved=True)
+    proposed = doc['content']['scenes']
+    actual = project.storyboard['scenes']
+    if len(actual) != len(proposed) or any(
+            s['scene_id'] != p['scene_id'] or s.get('type', 'image') != p['media_type']
+            for s, p in zip(actual, proposed)):
+        raise ValidationError('Storyboard scene IDs/types differ from proposal. Export scene brief, bind assets and compile first')
+    style = doc['content']['style']
+    seed = project.config['planning']['seed']
+    result = {'schema_version': '1.1', 'plan_meta': {
+        'source': 'ai_assisted', 'provider': doc['usage'].get('provider'),
+        'model': doc['usage'].get('model'), 'prompt_version': PROMPT_VERSION,
+        'cache_key': plan_cache_key(project, style, seed), 'revisions_used': 0,
+        'approved_by_user': False, 'seed': seed},
+        'style': style,
+        'scenes': [{'scene_id': decision['scene_id'], 'motion': decision['motion'],
+                    'motion_intensity': decision['motion_intensity'],
+                    'transition_to_next': decision['transition_to_next'],
+                    'transition_length': decision['transition_length']}
+                   for decision in proposed]}
+    validate_editing_plan(project, result)
+    return result
+
+
 def apply_scene_plan(project:Project,*,replace:bool=False) -> dict[str,Any]:
     """Apply only when current Core storyboard matches proposed scene IDs/media types.
 
     Never edits media references, narration, storyboard or approves a Core editing plan.
     """
-    doc=load_scene_plan(project,approved=True)
-    proposed=doc['content']['scenes']
-    actual=project.storyboard['scenes']
-    if len(actual)!=len(proposed) or any(s['scene_id']!=p['scene_id'] or s.get('type','image')!=p['media_type']
-                                         for s,p in zip(actual,proposed)):
-        raise ValidationError('Storyboard scene IDs/types differ from proposal. Export scene brief, bind assets and compile first')
-    path=project.folder/'editing_plan.json'
+    path = project.folder / 'editing_plan.json'
     if path.exists() and not replace:
         raise ValidationError('Editing plan exists; use --replace only after review (never overwrites silently)')
-    style=doc['content']['style']
-    seed=project.config['planning']['seed']
-    result={'schema_version':'1.1','plan_meta':{
-        'source':'ai_assisted','provider':doc['usage'].get('provider'),
-        'model':doc['usage'].get('model'), 'prompt_version':PROMPT_VERSION,
-        'cache_key':plan_cache_key(project,style,seed),'revisions_used':0,
-        'approved_by_user':False,'seed':seed},
-        'style':style,
-        'scenes':[{'scene_id':p['scene_id'],'motion':p['motion'],'motion_intensity':p['motion_intensity'],
-                   'transition_to_next':p['transition_to_next'],'transition_length':p['transition_length']}
-                  for p in proposed]}
-    validate_editing_plan(project,result)
+    result = build_scene_editing_plan(project)
     atomic_write_json(path,result)
     return {'project_id':project.project_id,'status':'EDITING_PLAN_CREATED','source':'ai_assisted',
             'file':str(path),'approved_by_user':False,'scenes':len(result['scenes'])}

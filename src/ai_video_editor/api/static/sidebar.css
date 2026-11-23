@@ -1,0 +1,22 @@
+/* Shared sidebar host geometry. Sidebar internals are isolated in Shadow DOM. */
+.layout > aside#app-sidebar {
+  display:block !important;
+  flex:0 0 236px !important;
+  width:236px !important;
+  min-width:236px !important;
+  margin:0 !important;
+  padding:24px 14px !important;
+  background:#122037 !important;
+  color:#e3ebf7 !important;
+  box-sizing:border-box !important;
+  align-self:stretch;
+}
+@media(max-width:760px) {
+  .layout > aside#app-sidebar {
+    display:block !important;
+    flex:0 0 58px !important;
+    width:58px !important;
+    min-width:58px !important;
+    padding:12px 5px !important;
+  }
+}

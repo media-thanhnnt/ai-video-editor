@@ -18,7 +18,24 @@ from .ffmpeg_support import check_ffmpeg
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _utf8_stdio() -> None:
+    """Print Vietnamese/Japanese safely when stdout is a pipe or file.
+
+    A real Windows console already uses UTF-8, but redirected output (GUI render log,
+    PowerShell pipes) falls back to the ANSI code page (e.g. cp932/cp1252) and any
+    non-encodable character raised UnicodeEncodeError and aborted the command.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, 'encoding', None) or '').lower().replace('-', '').replace('_', '')
+        if encoding != 'utf8' and hasattr(stream, 'reconfigure'):
+            try:
+                stream.reconfigure(encoding='utf-8', errors='replace')
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_stdio()
     parser = argparse.ArgumentParser(description='AI Video Editor — Phase 1.10 Mixed Media + Audio + Subtitles')
     parser.add_argument('--projects-dir', type=Path, default=ROOT / 'projects')
     parser.add_argument('--default-config', type=Path, default=ROOT / 'config/default_project.json')
@@ -83,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     script_input.add_argument('--request-file', type=Path, help='UTF-8 plain text request file')
     script_input.add_argument('--import-json', type=Path, help='Offline import: JSON with script, scenes and prompts')
     script_cmd.add_argument('--model', default='gpt-4.1-mini')
+    script_cmd.add_argument('--use-provider-settings', action='store_true',
+                            help='Use provider/model selected for Script in API Settings (instead of --model)')
     script_cmd.add_argument('--replace', action='store_true')
     approve_script_cmd = cmd.add_parser('agent-script-approve', help='Approve Phase 2.2 script draft after review')
     approve_script_cmd.add_argument('project_id')
@@ -95,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
     scene_cmd.add_argument('project_id')
     scene_src = scene_cmd.add_mutually_exclusive_group(required=True)
     scene_src.add_argument('--model', help='OpenAI model for scene planning')
+    scene_src.add_argument('--configured-provider', action='store_true',
+                           help='Use scene-plan provider/model from API Settings')
     scene_src.add_argument('--import-json', type=Path, help='Offline scene plan JSON')
     scene_cmd.add_argument('--replace', action='store_true')
     for name, description in (
@@ -106,12 +127,123 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument('project_id')
         if name in ('agent-scene-export','agent-scene-apply'):
             sp.add_argument('--replace',action='store_true')
+    prompt_cmd = cmd.add_parser('agent-asset-prompts', help='Print or export image/video/voice prompts; no API charges')
+    prompt_cmd.add_argument('project_id')
+    prompt_cmd.add_argument('--format', choices=['markdown', 'json'], default='markdown')
+    prompt_cmd.add_argument('--output', type=Path)
+    # Phase 2.5.1: additive CLI surface; legacy commands retain their signatures.
+    providers_cmd = cmd.add_parser('provider', help='Manage local provider catalog, models and task routing')
+    providers_sub = providers_cmd.add_subparsers(dest='provider_action', required=True)
+    providers_sub.add_parser('list', help='Show provider catalog and task routing (never keys)')
+    pm_models = providers_sub.add_parser('models', help='Show available models for a provider')
+    pm_models.add_argument('provider_id')
+    pm_add = providers_sub.add_parser('add', help='Add HTTPS OpenAI-compatible provider')
+    pm_add.add_argument('provider_id')
+    pm_add.add_argument('--label', required=True)
+    pm_add.add_argument('--base-url', required=True)
+    pm_model = providers_sub.add_parser('add-model', help='Register provider model for a task')
+    pm_model.add_argument('provider_id')
+    pm_model.add_argument('--task', choices=['script','scene_plan','image','audio'], required=True)
+    pm_model.add_argument('--model', required=True)
+    pm_set = providers_sub.add_parser('set', help='Select provider and model for a task')
+    pm_set.add_argument('task', choices=['script','scene_plan','image','audio'])
+    pm_set.add_argument('provider_id')
+    pm_set.add_argument('--model', required=True)
+    pm_key = providers_sub.add_parser('key-status', help='Check whether API key is configured')
+    pm_key.add_argument('provider_id')
+    pm_secret = providers_sub.add_parser('key-set', help='Save API key to OS keyring (never pass as CLI arg)')
+    pm_secret.add_argument('provider_id')
+    pm_secret.add_argument('--stdin', action='store_true', help='Read one line from standard input')
+
+    asset_cmd = cmd.add_parser('asset', help='Paid asset generation, local limits and auto-binding')
+    asset_sub = asset_cmd.add_subparsers(dest='asset_action', required=True)
+    for action, kind in [('generate-image','image'), ('generate-voice','audio'),
+                         ('batch-image','image'), ('batch-voice','audio')]:
+        ap = asset_sub.add_parser(action, help=f'Generate {kind} via configured provider')
+        ap.add_argument('project_id')
+        if action.startswith('generate-'):
+            ap.add_argument('--scene', required=True)
+        else:
+            group = ap.add_mutually_exclusive_group(required=True)
+            group.add_argument('--scenes', help='Comma-separated scene IDs')
+            group.add_argument('--all-scenes', action='store_true', help='All scenes with compatible prompts')
+        if kind == 'audio':
+            ap.add_argument('--voice', help='Provider-specific voice; override project preference')
+        ap.add_argument('--yes', action='store_true', help='Authorize paid API calls; needed in automation')
+        ap.add_argument('--auto-bind', action='store_true', help='Bind generated assets into manifest')
+    ap = asset_sub.add_parser('auto-bind', help='Bind previously generated assets into scene manifest')
+    ap.add_argument('project_id')
+    ap = asset_sub.add_parser('usage', help='Show local per-project request usage, not provider balance')
+    ap.add_argument('project_id')
+    ap = asset_sub.add_parser('limits', help='Set per-project daily attempt limits')
+    ap.add_argument('project_id')
+    ap.add_argument('--image', required=True, type=int)
+    ap.add_argument('--audio', required=True, type=int)
     cmd.add_parser('agent-tools', help='List safe Phase 2.1 agent tools')
     cmd.add_parser('list', help='List local projects')
+    ui = cmd.add_parser('ui', help='Start localhost Web GUI (Phase 2.4.1)')
+    ui.add_argument('--host', default='127.0.0.1', choices=['127.0.0.1', 'localhost'])
+    ui.add_argument('--port', type=int, default=8765)
     args = parser.parse_args(argv)
     pm = ProjectManager(args.projects_dir, args.default_config)
     try:
-        if args.action == 'init':
+        if args.action == 'provider':
+            from .cli_assets import provider_command
+            print(json.dumps(provider_command(args, args.projects_dir), ensure_ascii=False, indent=2))
+        elif args.action == 'asset':
+            from .cli_assets import generate
+            from .api.workflow import bind_generated
+            from .api.limits import usage as local_usage, set_limits
+            project = pm.load_project(args.project_id)
+            if args.asset_action == 'auto-bind':
+                payload = bind_generated(project)
+            elif args.asset_action == 'usage':
+                try:
+                    payload = local_usage(project)
+                except (ValueError, OSError, TypeError, KeyError) as exc:
+                    raise ValidationError('Invalid local API limits/usage file') from exc
+            elif args.asset_action == 'limits':
+                try:
+                    payload = set_limits(project, image=args.image, audio=args.audio)
+                except (ValueError, OSError, TypeError) as exc:
+                    raise ValidationError(str(exc)) from exc
+            else:
+                kind = 'image' if args.asset_action.endswith('image') else 'audio'
+                if args.asset_action.startswith('generate-'):
+                    ids = [args.scene]
+                elif args.all_scenes:
+                    ids = None
+                else:
+                    ids = [v.strip() for v in args.scenes.split(',')]
+                payload = generate(project, args.projects_dir, kind=kind, scene_ids=ids,
+                                   voice=getattr(args, 'voice', None), yes=args.yes,
+                                   bind=args.auto_bind)
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            if isinstance(payload, dict) and payload.get('failed'):
+                return 1
+        elif args.action == 'ui':
+            try:
+                import uvicorn
+                from .api.app import create_app
+            except ImportError as exc:
+                raise ValidationError('Web GUI dependencies not installed: pip install -e .[ui]') from exc
+            application = create_app(projects_dir=args.projects_dir, default_config=args.default_config)
+            print(f'AI Video Editor GUI: http://{args.host}:{args.port}', flush=True)
+            uvicorn.run(application, host=args.host, port=args.port)
+        elif args.action == 'agent-asset-prompts':
+            from .agent.asset_workflow import make_prompt_pack, render_prompt_markdown
+            pack = make_prompt_pack(pm.load_project(args.project_id))
+            output = (render_prompt_markdown(pack) if args.format == 'markdown'
+                      else json.dumps(pack, ensure_ascii=False, indent=2))
+            if args.output:
+                try:
+                    args.output.write_text(output + '\n', encoding='utf-8')
+                except OSError as exc:
+                    raise ValidationError('Cannot export prompt pack to output path') from exc
+                print('EXPORTED:', args.output)
+            else:
+                print(output)
+        elif args.action == 'init':
             project = pm.create_project(args.project_id, args.title)
             print(f'CREATED: {project.folder}')
         elif args.action == 'show':
@@ -222,6 +354,13 @@ def main(argv: list[str] | None = None) -> int:
                               'checks':qa['checks'], 'warnings':qa['warnings']},ensure_ascii=False,indent=2))
             if qa['status'] != 'PASS':
                 return 1
+            # Successful CLI compose must clear the same revision marker as GUI render.
+            pending = project.folder / 'script_revision_pending.json'
+            if pending.exists():
+                try:
+                    pending.unlink()
+                except OSError as exc:
+                    raise ValidationError('Render succeeded but could not clear script revision marker') from exc
         elif args.action in ('agent-scene-plan','agent-scene-status','agent-scene-approve',
                              'agent-scene-export','agent-scene-apply'):
             from .agent.scene_planner import (
@@ -241,8 +380,13 @@ def main(argv: list[str] | None = None) -> int:
                     from .agent.script_generator import digest
                     if script.get('status')!='SCRIPT_APPROVED' or script.get('approved_hash')!=digest(script['content']):
                         raise ValidationError('Approve unchanged Phase 2.2 script before AI planning')
-                    content,usage=generate_openai_scene_plan(script['content'],model=args.model)
-                    payload=create_scene_plan(project,content,source='openai',usage=usage,replace=args.replace)
+                    if args.configured_provider:
+                        from .cli_assets import generate_text_with_settings
+                        content, usage, source = generate_text_with_settings(args.projects_dir, 'scene_plan', script['content'])
+                    else:
+                        content, usage = generate_openai_scene_plan(script['content'], model=args.model)
+                        source = 'openai'
+                    payload=create_scene_plan(project,content,source=source,usage=usage,replace=args.replace)
             elif args.action=='agent-scene-approve':
                 payload=approve_scene_plan(project)
             elif args.action=='agent-scene-export':
@@ -270,8 +414,13 @@ def main(argv: list[str] | None = None) -> int:
                     requirement = (args.request_file.read_text(encoding='utf-8') if args.request_file else args.request)
                     if not requirement or not requirement.strip():
                         raise ValidationError('Natural language requirement must not be empty')
-                    content, usage = openai_generate(requirement, model=args.model)
-                    payload = create_script_draft(project, content, source='openai', brief=requirement,
+                    if args.use_provider_settings:
+                        from .cli_assets import generate_text_with_settings
+                        content, usage, source = generate_text_with_settings(args.projects_dir, 'script', requirement)
+                    else:
+                        content, usage = openai_generate(requirement, model=args.model)
+                        source = 'openai'
+                    payload = create_script_draft(project, content, source=source, brief=requirement,
                                                   usage=usage, replace=args.replace)
             elif args.action == 'agent-script-approve':
                 payload = approve_script(project)

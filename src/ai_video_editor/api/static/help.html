@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hướng dẫn sử dụng | AI Video Editor</title>
+<link rel="stylesheet" href="/static/sidebar.css?v=2511"><script src="/static/sidebar.js?v=2511" defer></script>
+<style>
+:root{font-family:Inter,'Segoe UI',system-ui,sans-serif;color:#24354c;background:#f3f6fb}*{box-sizing:border-box}body{margin:0}.layout{display:flex;min-height:100vh}main{padding:32px;max-width:1260px;min-width:0;flex:1}h1{font-size:28px;margin:0 0 8px}h2{font-size:19px;margin:0 0 15px}h3{font-size:15px;margin:17px 0 9px}p,li{line-height:1.65}small,.muted{color:#64748b}.box{padding:22px;background:#fff;border:1px solid #dce4f0;border-radius:13px;margin:18px 0;box-shadow:0 3px 14px #182b4509}a{color:#315fce;text-decoration:none}a:hover{text-decoration:underline}.links{display:flex;gap:10px;flex-wrap:wrap}.links a{padding:10px 13px;border:1px solid #dce4f0;border-radius:9px;background:#f8faff;font-size:13px;font-weight:600}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}code{font-family:Consolas,monospace;font-size:13px;background:#eef3fa;padding:2px 5px;border-radius:4px}pre{background:#142238;color:#e9f1ff;border-radius:9px;padding:16px;white-space:pre-wrap;overflow:auto;line-height:1.6}pre code{padding:0;color:inherit;background:transparent}.steps{padding-left:23px}.steps li{padding:6px 0}.tag{display:inline-block;font-size:12px;color:#2454a3;background:#e7efff;padding:4px 9px;border-radius:20px;margin-right:6px}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #e7eaf1;padding:10px;text-align:left;vertical-align:top}th{background:#f6f9ff}.warning{border-left:4px solid #d89725;background:#fff9e9;padding:12px 15px;border-radius:5px}summary{cursor:pointer;font-weight:650;padding:10px 0}details+details{border-top:1px solid #e5eaf2}@media(max-width:900px){.grid{grid-template-columns:1fr}}@media(max-width:760px){main{padding:16px}}
+</style>
+</head>
+<body><div class="layout"><aside id="app-sidebar" aria-label="Main navigation"></aside><main>
+<h1>Hướng dẫn sử dụng AI Video Editor</h1>
+<p class="muted">Quy trình tạo video từ ý tưởng đến MP4 qua giao diện Web UI hoặc dòng lệnh CLI trên Windows/Linux. Hai cách sử dụng chung project và dữ liệu.</p>
+<div class="links"><a href="#gui">Quy trình Web UI</a><a href="#cli">Quy trình CLI</a><a href="#api">Provider / API</a><a href="#troubleshoot">Xử lý lỗi</a></div>
+<section class="box" id="gui"><h2>1 · Quy trình trên Web UI</h2>
+<ol class="steps">
+<li><b>Dashboard — Chọn hoặc tạo Project.</b> Mỗi project có kịch bản, dữ liệu scene, assets và kết quả render riêng. <a href="/">Mở Dashboard</a>.</li>
+<li><b>API Settings — Chọn Provider/Model cho từng tác vụ.</b> Cấu hình Script, Scene Plan, Image, Audio và nhập API key nếu dùng API có phí. <a href="/api-settings">Mở API Settings</a>.</li>
+<li><b>Script Editor — Tạo và duyệt kịch bản.</b> Nhập yêu cầu, bấm <b>Generate Script</b>, kiểm tra/chỉnh thông tin chung và từng scene, <b>Save Changes → Approve Script → Export Brief</b>. Để chỉnh sửa bằng file, dùng <b>Export Script JSON</b>, sửa JSON và <b>Import Script JSON</b> trên Script Editor; sau khi nội dung đổi phải phê duyệt và tạo lại kế hoạch downstream. <a href="/script-editor">Mở Script Editor</a>.</li>
+<li><b>Scene Planner — Lên kế hoạch cảnh quay.</b> Bấm <b>Generate Scene Plan</b>, chọn scene bên phải để xem media type, motion, transition, prompt, thời lượng. <b>Save → Approve → Export Asset Brief</b>. <a href="/scene-planner">Mở Scene Planner</a>.</li>
+<li><b>Asset Workspace — Chuẩn bị media và giọng đọc.</b> Sao chép/xuất prompt để tạo thủ công; hoặc dùng API Image/Voice theo scene hay batch. Chọn scene bằng checkbox, chọn voice, kiểm tra <b>Giới hạn API</b>, xác nhận trước khi tạo. <a href="/asset-workspace">Mở Asset Workspace</a>.</li>
+<li><b>Render Studio — Bind và render.</b> Tải ảnh/video/voice lên nếu cần, <b>Auto-bind → Validate/Approve Manifest → Generate/Approve Editing Plan → Render</b>, theo dõi tiến độ và xem MP4. <a href="/render-studio">Mở Render Studio</a>.</li>
+</ol>
+<div class="warning"><b>Lưu ý chi phí:</b> Copy prompt, chỉnh sửa và duyệt không tự tạo media bằng API. Generate Script, Generate Scene Plan, Generate Image và Generate Voice có thể phát sinh phí, tùy provider/model. Batch cần xác nhận riêng. Giới hạn trong ứng dụng không phải số dư thực tế tại nhà cung cấp.</div>
+</section>
+<section class="box"><h2>2 · Mỗi bước tạo ra file nào?</h2>
+<table><thead><tr><th>Bước</th><th>File chính trong projects/&lt;project_id&gt;/</th></tr></thead><tbody>
+<tr><td>Generate Script</td><td><code>agent_script_draft.json</code></td></tr>
+<tr><td>Export Script Brief</td><td><code>agent_brief_generated.json</code></td></tr>
+<tr><td>Generate Scene Plan</td><td><code>agent_scene_plan.json</code></td></tr>
+<tr><td>Export Asset Brief</td><td><code>agent_scene_brief.json</code></td></tr>
+<tr><td>Generate Image / Voice</td><td><code>generated_assets.json</code> và các file trong <code>assets/</code></td></tr>
+<tr><td>Bind + Compile</td><td><code>agent_manifest.json</code>, <code>storyboard.json</code></td></tr>
+<tr><td>Editing Plan / Render</td><td><code>editing_plan.json</code>, checkpoint và file đầu ra trong project</td></tr>
+</tbody></table><p class="muted">Sau khi thay đổi kịch bản đã duyệt, cần duyệt lại các kế hoạch phụ thuộc. Không tự sử dụng lại voice hoặc plan cũ khi nội dung đã thay đổi.</p></section>
+<section class="box" id="cli"><h2>3 · Quy trình bằng CLI</h2>
+<p>CLI phù hợp Linux, server cloud, PowerShell và automation. Các lệnh dưới đây dùng project minh họa <code>demo_video</code>; thay bằng ID project thực tế.</p>
+<h3>A. Tạo project và cấu hình provider</h3>
+<pre><code>ai-video-editor init demo_video --title "Video Demo"
+ai-video-editor provider list
+ai-video-editor provider models gemini
+ai-video-editor provider key-set gemini
+ai-video-editor provider set audio gemini --model gemini-2.5-flash-preview-tts</code></pre>
+<h3>B. Tạo, duyệt Script và Scene Plan</h3>
+<pre><code>ai-video-editor agent-script demo_video --request "Tạo video 30 giây về biển, 3 scene, tiếng Việt" --use-provider-settings
+ai-video-editor agent-script-status demo_video
+ai-video-editor agent-script-approve demo_video
+ai-video-editor agent-script-export demo_video
+ai-video-editor agent-scene-plan demo_video --configured-provider
+ai-video-editor agent-scene-status demo_video
+ai-video-editor agent-scene-approve demo_video
+ai-video-editor agent-scene-export demo_video</code></pre>
+<p class="muted">Nếu file đã tồn tại, CLI có thể yêu cầu xác nhận ghi đè. Kiểm tra trạng thái trước khi tạo lại để không mất công việc cũ.</p>
+<h3>C. Xuất prompt để dùng công cụ bên ngoài hoặc tạo asset bằng API</h3>
+<pre><code>ai-video-editor agent-asset-prompts demo_video --format markdown --output asset_prompts.md
+ai-video-editor asset usage demo_video
+ai-video-editor asset limits demo_video --image 100 --audio 100
+ai-video-editor asset generate-voice demo_video --scene 001 --voice Kore --auto-bind
+ai-video-editor asset batch-image demo_video --scenes 001,002,003 --auto-bind
+ai-video-editor asset batch-voice demo_video --all-scenes --voice Kore --auto-bind
+ai-video-editor asset auto-bind demo_video</code></pre>
+<p><b>Không có <code>--yes</code></b>, CLI yêu cầu xác nhận tương tác. Khi tự động hóa và đã chấp thuận chi phí, mới thêm <code>--yes</code>. Chọn Voice chỉ có hiệu lực với provider/model hỗ trợ voice đó.</p>
+<h3>D. Bind thủ công và dựng video</h3>
+<pre><code>ai-video-editor agent-init demo_video --brief projects/demo_video/agent_scene_brief.json
+ai-video-editor agent-bind demo_video --scene 001 --kind media --file assets/images/scene_001.png
+ai-video-editor agent-bind demo_video --scene 001 --kind voice --file assets/audio/scene_001.mp3
+ai-video-editor agent-status demo_video
+ai-video-editor agent-approve demo_video
+ai-video-editor agent-compile demo_video
+ai-video-editor plan demo_video
+ai-video-editor approve-plan demo_video
+ai-video-editor compose demo_video --deep</code></pre>
+<p class="muted">Các file ví dụ chỉ hợp lệ khi thực sự tồn tại và loại media của scene tương ứng. Với kế hoạch AI đã duyệt, tham khảo <code>ai-video-editor agent-scene-apply demo_video</code> thay cho tạo plan rule-based, sau khi storyboard đã sẵn sàng. Lệnh <code>compose</code> tái sử dụng checkpoint/cache hợp lệ theo Core.</p>
+</section>
+<section class="box" id="api"><h2>4 · Provider, API key và lựa chọn Voice</h2>
+<div class="grid"><div><span class="tag">Script / Scene Plan</span><p>Chọn provider/model trong <a href="/api-settings">API Settings</a>. CLI có <code>--use-provider-settings</code> hoặc <code>--configured-provider</code> để dùng cùng định tuyến.</p></div><div><span class="tag">Image / Audio</span><p>Chọn provider riêng theo tác vụ. Voice của project được giữ lại cho các lần tạo sau; batch dùng một giọng cho các scene được chọn.</p></div></div>
+<p>API key được lưu trong OS keyring hoặc lấy từ biến môi trường được hỗ trợ, không đặt vào project JSON hay source. Không chia sẻ key trên ảnh chụp màn hình/log.</p></section>
+<section class="box" id="troubleshoot"><h2>5 · Các câu hỏi thường gặp</h2>
+<details><summary>Generate Voice có đọc image prompt không?</summary><p>Không. TTS phải dùng narration tiếng Việt của scene. Hãy kiểm tra và nghe thử một scene trước khi chạy batch.</p></details>
+<details><summary>Đã có Script nhưng không chỉnh được Scene Plan?</summary><p>Script thay đổi làm kế hoạch downstream cũ không còn phù hợp. Lưu và duyệt lại Script, tạo Scene Plan mới rồi duyệt lại các bước liên quan.</p></details>
+<details><summary>Tại sao không thể dùng ảnh thay video clip?</summary><p>Loại media trong Scene Plan/Manifest phải khớp file được gán. Muốn dùng PNG thay MP4, hãy cập nhật media type và duyệt lại kế hoạch.</p></details>
+<details><summary>Hết lượt Image/Audio?</summary><p>Vào Asset Workspace, mục 3 · Giới hạn API để tự đặt số lượt/ngày. Hạn mức này chỉ là giới hạn nội bộ; nhà cung cấp API vẫn có giá và quota riêng.</p></details>
+<details><summary>Render chậm, bị timeout hoặc dừng giữa chừng?</summary><p>Kiểm tra log/checkpoint, giữ nguyên assets và editing plan để Core có cơ hội tái sử dụng cache hợp lệ. GUI có thiết lập Render Timeout; đặt 0 để không giới hạn tổng thời gian tại lớp GUI.</p></details>
+<details><summary>Cần dùng GUI trên Linux không?</summary><p>CLI chạy trực tiếp trên Linux. GUI chạy localhost bằng <code>ai-video-editor ui</code> nếu đã cài <code>pip install -e '.[ui]'</code>. Không nên công khai cổng GUI ra Internet.</p></details>
+</section>
+<p class="muted">AI Video Editor · Hướng dẫn dựa trên các chức năng hiện có ở Phase 2.5.1 và các màn hình Phase 2.4.</p>
+</main></div></body></html>

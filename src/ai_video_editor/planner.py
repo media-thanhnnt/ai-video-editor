@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 from typing import Any
 
 from .project import Project, ValidationError, atomic_write_json
@@ -90,7 +91,8 @@ def validate_editing_plan(project: Project, plan: Any, *, require_current: bool 
     valid_rule = (meta['source'] == 'rule_based' and meta['provider'] is None
                   and meta['model'] is None and meta['prompt_version'] == PROMPT_VERSION)
     valid_ai = (meta['source'] == 'ai_assisted' and meta['prompt_version'] == 'ai-scene-v2.3.0'
-                and meta['provider'] in ('openai','manual')
+                and isinstance(meta['provider'], str)
+                and re.fullmatch(r'[a-z][a-z0-9_-]{1,39}', meta['provider']) is not None
                 and (meta['model'] is None or isinstance(meta['model'], str)))
     if (not (valid_rule or valid_ai) or meta['revisions_used'] != 0
         or type(meta['approved_by_user']) is not bool or type(meta['seed']) is not int):

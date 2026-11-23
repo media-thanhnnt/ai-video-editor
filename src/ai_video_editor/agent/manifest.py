@@ -11,7 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..project import (Project, ValidationError, atomic_write_json, check_relpath,
+from ..assets import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS
+from ..project import (Project, ValidationError, validate_sequence, atomic_write_json, check_relpath,
                       ensure_inside, read_json, validate_storyboard)
 
 SCHEMA = '2.1'
@@ -48,10 +49,7 @@ def validate_brief(brief: dict[str, Any]) -> dict[str, Any]:
         if kind == 'image' and not scene.get('narration', '').strip():
             raise ValidationError(f'Scene {sid}: Phase 1 Core requires narration and audio for image scenes')
         if kind == 'image_sequence':
-            seq = scene.get('sequence')
-            if not isinstance(seq, dict) or set(seq) != {'frames_dir','frame_pattern','frame_count','fps'}:
-                raise ValidationError(f'Scene {sid}: sequence must define frames_dir, frame_pattern, frame_count and fps')
-            check_relpath(seq['frames_dir'], 'sequence.frames_dir')
+            validate_sequence(scene.get('sequence'), sid)
     return brief
 
 
@@ -137,12 +135,15 @@ def bind_asset(project: Project, scene_id: str, kind: str, relative_file: str) -
     if not relative.startswith(root):
         raise ValidationError(f'Asset must live under {root}')
     suffix=Path(relative).suffix.lower()
-    allowed={'.wav','.mp3','.m4a'} if kind=='voice' else ({'.png','.jpg','.jpeg'} if scene['type']=='image' else {'.mp4','.mov','.mkv'})
+    allowed=AUDIO_EXTENSIONS if kind=='voice' else (IMAGE_EXTENSIONS if scene['type']=='image' else {'.mp4','.mov','.mkv'})
     if suffix not in allowed:
         raise ValidationError(f'Unsupported {kind} extension: {suffix}')
     if not ensure_inside(project.folder, relative).is_file():
         raise ValidationError(f'Asset not found: {relative}')
-    scene['voice_file' if kind=='voice' else 'media_file']=relative
+    field = 'voice_file' if kind=='voice' else 'media_file'
+    if scene.get(field) == relative:
+        return data  # Idempotent: no need to invalidate a compiled storyboard.
+    scene[field] = relative
     data['status']='READY_FOR_REVIEW' if not missing_assets(project,data) else 'WAITING_FOR_ASSETS'
     atomic_write_json(project.folder / MANIFEST, data)
     return data

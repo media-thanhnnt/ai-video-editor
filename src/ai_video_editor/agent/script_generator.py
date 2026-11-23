@@ -104,8 +104,9 @@ def _extract_response_text(payload: dict[str, Any]) -> str:
 
 def openai_generate(brief: str, *, model: str = 'gpt-4.1-mini',
                     api_key: str | None = None, timeout: int = 120,
-                    opener: Callable[..., Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
-    key = api_key or os.environ.get('OPENAI_API_KEY')
+                    opener: Callable[..., Any] | None = None,
+                    base_url: str = 'https://api.openai.com/v1') -> tuple[dict[str, Any], dict[str, Any]]:
+    key = (api_key if api_key is not None else (os.environ.get('OPENAI_API_KEY') if base_url.rstrip('/') == 'https://api.openai.com/v1' else None))
     if not key:
         raise ValidationError('OPENAI_API_KEY missing; use --import-json for manual chatbot output')
     if not isinstance(model, str) or not model.strip():
@@ -126,7 +127,7 @@ def openai_generate(brief: str, *, model: str = 'gpt-4.1-mini',
         'text': {'format': {'type': 'json_schema', 'name': 'video_script',
                             'strict': True, 'schema': _schema()}},
     }
-    req = request.Request('https://api.openai.com/v1/responses',
+    req = request.Request(base_url.rstrip('/') + '/responses',
                           data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
                           headers={'Authorization': f'Bearer {key}',
                                    'Content-Type': 'application/json'}, method='POST')
@@ -140,8 +141,10 @@ def openai_generate(brief: str, *, model: str = 'gpt-4.1-mini',
         raise ValidationError(f'OpenAI connection failed: {type(exc).__name__}') from exc
     try:
         payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError('response payload must be an object')
         result = json.loads(_extract_response_text(payload))
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
         raise ValidationError('Invalid structured JSON response from OpenAI') from exc
     validate_script(result)
     usage = payload.get('usage') or {}

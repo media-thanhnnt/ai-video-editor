@@ -4,13 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-video-editor"
-version = "2.3.0"
-description = "AI Video Editor — Phase 2.3 AI scene and storyboard planning atop Core 1.10.3"
+version = "2.5.1.3"
+description = "AI Video Editor — GUI and CLI parity, provider security and editing-plan integrity fixes"
 requires-python = ">=3.10"
 dependencies = ["Pillow>=10.0,<13", "numpy>=1.26,<3", "opencv-python>=4.8,<5"]
+
+[project.optional-dependencies]
+ui = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "python-multipart>=0.0.9", "keyring>=25,<27"]
+test = ["httpx>=0.27,<1"]
 
 [project.scripts]
 ai-video-editor = "ai_video_editor.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"ai_video_editor.api" = ["static/index.html", "static/script-editor.html", "static/scene-planner.html", "static/asset-workspace.html", "static/render-studio.html", "static/api-settings.html", "static/help.html", "static/assets/*", "static/sidebar.css", "static/sidebar.js"]

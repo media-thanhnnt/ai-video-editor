@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "openai": {
+      "label": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "env": "OPENAI_API_KEY",
+      "adapter": "openai"
+    },
+    "gemini": {
+      "label": "Google Gemini",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "env": "GEMINI_API_KEY",
+      "adapter": "gemini"
+    }
+  },
+  "models": {
+    "script": {
+      "openai": [
+        "gpt-6-luna",
+        "gpt-4.1-mini"
+      ],
+      "gemini": [
+        "gemini-2.5-flash"
+      ]
+    },
+    "scene_plan": {
+      "openai": [
+        "gpt-6-luna",
+        "gpt-4.1-mini"
+      ],
+      "gemini": [
+        "gemini-2.5-flash"
+      ]
+    },
+    "image": {
+      "openai": [
+        "gpt-image-2",
+        "gpt-image-1.5"
+      ],
+      "gemini": [
+        "gemini-2.5-flash-image"
+      ]
+    },
+    "audio": {
+      "openai": [
+        "gpt-4o-mini-tts",
+        "tts-1"
+      ],
+      "gemini": [
+        "gemini-2.5-flash-preview-tts",
+        "gemini-3.8-flash-lite-tts"
+      ]
+    },
+    "video": {}
+  }
+}

@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Script Editor | AI Video Editor</title>
+  <style>
+    :root{font-family:Inter,'Segoe UI',system-ui,sans-serif;color:#202c40;background:#f3f6fb}
+    *{box-sizing:border-box}
+    body{margin:0}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer;border:1px solid #dce4f0;padding:10px 15px;border-radius:9px;background:white;color:#253851;font-weight:600}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    .primary{background:#4365d9;border-color:#4365d9;color:white}
+    .green{background:#158167;border-color:#158167;color:white}
+    input,textarea,select{border:1px solid #d6dfeb;border-radius:9px;padding:12px;background:white;color:#243349;width:100%}
+    textarea{resize:vertical;min-height:115px;line-height:1.55}
+    label{font-size:12px;font-weight:650;color:#52647f;display:block;margin-bottom:7px}
+    .layout{display:flex;min-height:100vh}
+    main{flex:1;padding:35px max(20px,4%);max-width:1550px}
+    h1{margin:5px 0;font-size:27px}
+    p,.subtle{font-size:13px;color:#7d8ba0}
+    header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:25px}
+    .box{border:1px solid #e0e7f1;background:white;border-radius:14px;padding:23px;margin-bottom:17px}
+    .box h2{margin:0 0 17px;font-size:17px}
+    .cols{display:grid;grid-template-columns:minmax(280px,2fr) minmax(350px,3fr);gap:18px}
+    .field{margin:14px 0}
+    .actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:15px}
+    .status{font-size:12px;padding:8px 12px;border-radius:50px;background:#e9effa;color:#516581;display:inline-block}
+    .ok{background:#e1f7ec;color:#127a50}
+    .warn{background:#fff2df;color:#946d27}
+    .error{background:#fff0ed;color:#a53d39;padding:13px;border-radius:9px;margin-bottom:16px;white-space:pre-wrap}
+    .notice{background:#edf3ff;color:#37568b;padding:13px;border-radius:9px;font-size:13px}
+    .hidden{display:none!important}
+    .scene{border:1px solid #e2e8f0;padding:17px;border-radius:11px;margin:12px 0;background:#fcfdff}
+    .scene h3{margin:0 0 10px;font-size:14px}
+    .three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+    .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:15px 0}
+    .meta>div{background:#f3f6fa;border-radius:9px;padding:12px;font-size:12px}
+    .meta strong{display:block;margin-top:5px}
+    .topline{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    #loading{font-size:12px;color:#4a65aa}
+    .script-meta-panel{padding:18px;border:1px solid #e1e7f0;border-radius:12px;background:#f8faff}
+    .script-meta-panel h3{margin:0 0 16px;font-size:16px;color:#263b5a}
+    .scene-layout{display:grid;grid-template-columns:minmax(0,1fr) 235px;gap:18px;align-items:start}
+    .scene-detail{min-width:0}
+    .scene-nav{position:sticky;top:16px;background:#f4f7fc;border:1px solid #e1e7f0;border-radius:12px;padding:12px;max-height:75vh;overflow:auto}
+    .scene-nav h3{margin:0 0 6px;font-size:14px}
+    .scene-nav button{display:block;width:100%;margin:8px 0;text-align:left;white-space:normal;font-size:12px}
+    .scene-nav button.selected{background:#4365d9;color:white;border-color:#4365d9}
+    #scene-list>.scene:not(.selected){display:none}
+    @media(max-width:1150px){.cols{grid-template-columns:1fr}}
+    @media(max-width:850px){.scene-layout{grid-template-columns:1fr}.scene-nav{position:static;max-height:190px;overflow:auto;grid-row:1}}
+    @media(max-width:700px){main{padding:20px}.three,.meta{grid-template-columns:1fr}header{flex-wrap:wrap}}
+  </style>
+  <link rel="stylesheet" href="/static/sidebar.css?v=248">
+  <script src="/static/sidebar.js?v=2511" defer></script>
+</head>
+<body>
+<div class="layout">
+  <aside id="app-sidebar" aria-label="Main navigation"></aside>
+  <main>
+    <header>
+      <div>
+        <small class="subtle">WORKSPACE / SCRIPT EDITOR</small>
+        <h1>AI Script Editor</h1>
+        <p>Tạo, chỉnh sửa và phê duyệt kịch bản video ngay trong trình duyệt.</p>
+      </div>
+      <a href="/"><button>← Dashboard</button></a>
+    </header>
+
+    <div id="error" class="error hidden" role="alert"></div>
+    <div id="notice" class="notice hidden" role="status"></div>
+
+    <div class="cols">
+      <div>
+        <section class="box">
+          <h2>1 · Project &amp; OpenAI</h2>
+          <div class="field"><label for="project">Project</label><select id="project"></select></div>
+          <div class="field">
+            <label for="model">Provider / Model (API Settings)</label>
+            <input id="model" value="" readonly>
+            <datalist id="models"><option value="gpt-6-luna"><option value="gpt-4.1-mini"></datalist>
+            <small class="subtle"><a href="/api-settings">Thay đổi nhà cung cấp và model tại API Settings</a>.</small>
+          </div>
+          <div class="field"><label for="requirement">Yêu cầu tạo video</label><textarea id="requirement" rows="7" placeholder="Tạo video YouTube 30 giây về đại dương, tiếng Việt, gồm 3 scene..."></textarea></div>
+          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="replace" style="width:auto"> Cho phép thay thế Script hiện có</label>
+          <div class="actions"><button class="primary" id="generate">✨ Generate Script</button><span id="loading"></span></div>
+          <p class="subtle">Chỉ nút Generate Script mới gọi provider đã cấu hình và phát sinh phí API. API key được giữ ở backend, không truyền vào trình duyệt.</p>
+        </section>
+
+        <section class="box">
+          <h2>2 · Approval &amp; Export</h2>
+          <div class="topline"><span id="status" class="status">NOT STARTED</span><button id="refresh">↻ Refresh</button></div>
+          <div id="usage" class="meta"></div>
+          <div class="actions">
+            <button class="green" id="approve" disabled>✓ Approve Script</button>
+            <button id="export" disabled>↥ Export Brief</button>
+            <button id="export-json" type="button" disabled>↓ Export Script JSON</button>
+            <button id="import-json" type="button">↑ Import Script JSON</button>
+            <input id="import-file" type="file" accept=".json,application/json" class="hidden" aria-label="Select edited Script JSON">
+          </div>
+          <p class="subtle">Sau khi sửa, Script cần được phê duyệt lại. Export Brief dùng cho pipeline; Export Script JSON dùng để chỉnh sửa offline rồi Import lại. Cũng hỗ trợ Import file Brief đã xuất (không thêm/xóa scene).</p>
+          <a id="continue-scene" class="hidden" href="/scene-planner" style="display:inline-block;margin-top:12px;padding:12px 16px;border-radius:9px;background:#4267df;color:#fff;text-decoration:none;font-size:13px;font-weight:650">Continue to Scene Planner →</a>
+          <a id="prompt-link" href="/asset-workspace" style="display:inline-block;margin-top:12px;margin-left:8px;color:#355bd0">Export / Copy asset prompts →</a>
+        </section>
+      </div>
+
+      <div>
+        <section class="box">
+          <div class="topline">
+            <h2>3 · Thông tin chung của Script</h2>
+            <button id="save" disabled>💾 Save Changes</button>
+          </div>
+          <div id="empty" class="notice">Chọn project rồi tạo Script hoặc mở Script đã có.</div>
+          <div id="editor-meta" class="hidden">
+            <div class="script-meta-panel">
+              <h3>Thông tin chung của Script</h3>
+              <div class="three">
+                <div class="field"><label for="title">Title</label><input id="title"></div>
+                <div class="field"><label for="language">Language</label><input id="language"></div>
+                <div class="field"><label for="style">Style</label><select id="style"><option>documentary</option><option>calm</option><option>energetic</option></select></div>
+              </div>
+              <div class="field"><label for="duration">Target duration (seconds)</label><input type="number" min="5" max="7200" id="duration"></div>
+              <div class="field"><label for="summary">Summary</label><textarea id="summary" rows="2"></textarea></div>
+              <div class="field"><label for="script">Full narration script</label><textarea id="script" rows="5"></textarea></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="box">
+          <h2>4 · Scenes</h2>
+          <div id="scenes-empty" class="notice">Sau khi có Script, phần chỉnh sửa chi tiết từng scene sẽ hiển thị ở đây.</div>
+          <div id="editor-scenes" class="hidden">
+            <div class="scene-layout">
+              <div class="scene-detail"><div id="scene-list"></div></div>
+              <nav class="scene-nav" aria-label="Scene selection">
+                <h3>Danh sách Scenes</h3>
+                <p class="subtle">Nhấn scene để xem và chỉnh sửa</p>
+                <div id="scene-nav-list"></div>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <p class="subtle">Phase 2.4.2 · Backend FastAPI dùng lại nghiệp vụ Phase 2.2 · CLI không thay đổi.</p>
+  </main>
+</div>
+
+<script>
+'use strict';
+const e=id=>document.getElementById(id);
+let draft=null,working=false,selectedSceneId=null;
+
+function error(msg){e('error').textContent=msg;e('error').classList.toggle('hidden',!msg)}
+function note(msg){e('notice').textContent=msg;e('notice').classList.toggle('hidden',!msg)}
+async function api(path,opts={}){
+  const r=await fetch('/api'+path,{...opts,headers:{'Content-Type':'application/json',...opts.headers}});
+  const b=await r.json();
+  if(!r.ok)throw Error(b.detail||'Request failed');
+  return b;
+}
+function setWorking(v){working=v;e('loading').textContent=v?'Đang thực hiện, vui lòng không đóng trang...':'';syncButtons()}
+function syncButtons(){
+  const has=!!draft,approved=draft?.status==='SCRIPT_APPROVED';
+  e('generate').disabled=working||!e('project').value;
+  e('save').disabled=working||!has;
+  e('approve').disabled=working||!has||approved;
+  e('export').disabled=working||!approved;
+  e('export-json').disabled=working||!has;
+  e('import-json').disabled=working||!e('project').value;
+  e('status').textContent=draft?.status?.replaceAll('_',' ')||'NOT STARTED';
+  e('status').className='status '+(approved?'ok':has?'warn':'');
+}
+function wrap(parent,label,input){const d=document.createElement('div');d.className='field';let l=document.createElement('label');l.textContent=label;d.append(l,input);parent.appendChild(d);return input}
+function field(parent,label,value,multi=false){const input=document.createElement(multi?'textarea':'input');input.value=value||'';if(multi)input.rows=3;wrap(parent,label,input);return input}
+
+function selectScene(sceneId){
+  selectedSceneId=sceneId;
+  [...e('scene-list').children].forEach(card=>card.classList.toggle('selected',card._data.scene_id===sceneId));
+  [...e('scene-nav-list').children].forEach(btn=>btn.classList.toggle('selected',btn.dataset.scene===sceneId));
+}
+
+function rebuildSceneNav(){
+  const nav=e('scene-nav-list');
+  nav.replaceChildren();
+  const cards=[...e('scene-list').children];
+  if(!cards.length){selectedSceneId=null;return}
+  cards.forEach((card,index)=>{
+    const button=document.createElement('button');
+    button.type='button';
+    button.dataset.scene=card._data.scene_id;
+    button.textContent='Scene '+card._data.scene_id+' · '+card._data.type.value;
+    button.onclick=()=>selectScene(card._data.scene_id);
+    nav.appendChild(button);
+  });
+  const fallback=cards.some(card=>card._data.scene_id===selectedSceneId)?selectedSceneId:cards[0]._data.scene_id;
+  selectScene(fallback);
+}
+
+function draw(){
+  syncButtons();
+  e('empty').classList.toggle('hidden',!!draft);
+  e('scenes-empty').classList.toggle('hidden',!!draft);
+  e('editor-meta').classList.toggle('hidden',!draft);
+  e('editor-scenes').classList.toggle('hidden',!draft);
+  if(!draft){e('usage').innerHTML='';e('scene-list').replaceChildren();e('scene-nav-list').replaceChildren();return}
+
+  const c=draft.content;
+  for(let k of ['title','language','style','summary','script'])e(k).value=c[k]||'';
+  e('duration').value=c.target_duration_seconds;
+  e('requirement').value=draft.requirement||e('requirement').value;
+
+  e('usage').textContent='';
+  for(const [k,v] of Object.entries({Provider:draft.usage?.provider||'',Model:draft.usage?.model||'manual',Tokens:draft.usage?.total_tokens??0})){
+    const el=document.createElement('div'),b=document.createElement('strong');
+    el.textContent=k;b.textContent=String(v);el.appendChild(b);e('usage').appendChild(el);
+  }
+
+  e('scene-list').replaceChildren();
+  c.scenes.forEach((s)=>{
+    const box=document.createElement('div');box.className='scene';
+    const heading=document.createElement('h3');heading.textContent=`Scene ${s.scene_id}`;box.appendChild(heading);
+    const row=document.createElement('div');row.className='three';
+    const sceneId=field(row,'Scene ID',s.scene_id);sceneId.readOnly=true;
+    const type=document.createElement('select');
+    for(const opt of ['image','video_clip']){let o=document.createElement('option');o.value=opt;o.textContent=opt;type.append(o)}
+    type.value=s.type;wrap(row,'Media type',type);
+    const dur=document.createElement('input');dur.type='number';dur.min='0.1';dur.max='600';dur.step='0.1';dur.value=s.estimated_duration_seconds;wrap(row,'Duration (s)',dur);
+    box.appendChild(row);
+    const nar=field(box,'Narration',s.narration,true);
+    const prompt=field(box,'Media Prompt',s.prompt,true);
+    box._data={scene_id:s.scene_id,type,nar,prompt,dur};
+    e('scene-list').appendChild(box);
+  });
+  rebuildSceneNav();
+}
+
+function data(){
+  return {
+    title:e('title').value,
+    language:e('language').value,
+    style:e('style').value,
+    target_duration_seconds:Number(e('duration').value),
+    summary:e('summary').value,
+    script:e('script').value,
+    scenes:[...e('scene-list').children].map(node=>({
+      scene_id:node._data.scene_id,
+      type:node._data.type.value,
+      narration:node._data.nar.value,
+      prompt:node._data.prompt.value,
+      estimated_duration_seconds:Number(node._data.dur.value)
+    }))
+  };
+}
+function url(suffix=''){return `/projects/${encodeURIComponent(e('project').value)}/script${suffix}`}
+async function loadScript(){
+  error('');note('');e('continue-scene').classList.add('hidden');draft=null;
+  try{draft=await api(url())}catch(err){if(!String(err.message).includes('not created'))error(err.message)}
+  draw();
+}
+async function run(job){if(working)return;error('');note('');setWorking(true);try{await job()}catch(err){error(err.message||String(err))}finally{setWorking(false)}}
+
+e('refresh').onclick=()=>run(loadScript);
+e('project').onchange=()=>run(loadScript);
+e('generate').onclick=()=>run(async()=>{
+  let requirement=e('requirement').value.trim(),model=e('model').value.trim(),replace=e('replace').checked;
+  if(!requirement)throw Error('Vui lòng nhập yêu cầu tạo video');
+  if(!model)throw Error('Vui lòng nhập model');
+  if(draft&&!replace)throw Error('Script đã tồn tại. Bật ô thay thế để tạo lại (phát sinh token).');
+  if(draft&&!confirm('Tạo lại Script sẽ thay thế bản hiện có và làm mất approval. Tiếp tục gọi API tính phí?'))return;
+  draft=await api(url('/generate'),{method:'POST',body:JSON.stringify({requirement,model,replace})});
+  draw();note('Đã tạo Script. Hãy kiểm tra và phê duyệt.');
+});
+e('save').onclick=()=>run(async()=>{
+  if(!confirm('Lưu Script mới sẽ lưu các kế hoạch cũ vào history/ và yêu cầu tạo lại Scene Plan, Manifest, Editing Plan. MP4 đã render vẫn được giữ trong output/ nhưng không được coi là video của Script mới. Tiếp tục?'))return;
+  draft=await api(url(),{method:'PUT',body:JSON.stringify({content:data()})});
+  draw();note('Đã lưu. Cần Approve lại trước khi Export.');
+});
+e('approve').onclick=()=>run(async()=>{
+  if(!confirm('Phê duyệt nội dung Script hiện đã lưu? Nếu có sửa đổi chưa Save, hãy hủy và Save trước.'))return;
+  await api(url('/approve'),{method:'POST'});await loadScript();note('SCRIPT_APPROVED');
+});
+e('export').onclick=()=>run(async()=>{
+  try{
+    let result=await api(url('/export'),{method:'POST',body:JSON.stringify({replace:false})});
+    note('Asset brief đã xuất: '+result.file);showContinue();
+  }catch(err){
+    if(String(err.message).includes('already exists')&&confirm('Brief đã tồn tại. Bạn muốn ghi đè?')){
+      let result=await api(url('/export'),{method:'POST',body:JSON.stringify({replace:true})});
+      note('Asset brief đã cập nhật: '+result.file);showContinue();
+    }else throw err;
+  }
+});
+e('export-json').onclick=()=>run(async()=>{
+  if(!draft)throw Error('Chưa có Script để xuất');
+  const payload={format:'ai-video-editor-script',format_version:1,content:data()};
+  const blob=new Blob([JSON.stringify(payload,null,2)+'\n'],{type:'application/json;charset=utf-8'});
+  const link=document.createElement('a'),u=URL.createObjectURL(blob);
+  link.href=u;link.download=e('project').value+'_script_editable.json';document.body.appendChild(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(u),1000);note('Đã xuất JSON để chỉnh sửa offline. Import lại khi hoàn tất.');
+});
+e('import-json').onclick=()=>e('import-file').click();
+e('import-file').onchange=async()=>{
+  const input=e('import-file'),file=input.files?.[0];if(!file)return;
+  try{
+    if(file.size>2*1024*1024)throw Error('File JSON không được vượt 2 MB');
+    const raw=await file.text();let content;
+    try{content=JSON.parse(raw)}catch{throw Error('File không phải JSON hợp lệ')}
+    if(!content||typeof content!=='object'||Array.isArray(content))throw Error('JSON phải là object');
+    const answer=confirm('Import Script sẽ lưu nội dung đã chỉnh sửa; nếu khác bản hiện tại, Scene Plan/Manifest/Editing Plan cũ sẽ chuyển vào history và cần duyệt lại. Không gọi API. Tiếp tục?');
+    if(!answer)return;
+    await run(async()=>{
+      const result=await api(url('/import'),{method:'POST',body:JSON.stringify({content,replace:true})});
+      draft=result.draft;draw();note(result.changed?'Import thành công. Hãy kiểm tra và Approve Script.':'File giống Script hiện tại, không có thay đổi.');
+    });
+  }catch(err){error(err.message||String(err))}finally{input.value=''}
+};
+function showContinue(){let link=e('continue-scene');link.href='/scene-planner?project='+encodeURIComponent(e('project').value);link.classList.remove('hidden');e('prompt-link').href='/asset-workspace?project='+encodeURIComponent(e('project').value)}
+
+(async()=>{
+  try{
+    let r=await api('/projects');
+    e('project').replaceChildren();
+    for(let p of r.projects){if(p.error)continue;let opt=document.createElement('option');opt.value=p.project_id;opt.textContent=p.title+' ('+p.project_id+')';e('project').appendChild(opt)}
+    const requested=new URLSearchParams(location.search).get('project');
+    if(requested&&[...e('project').options].some(o=>o.value===requested))e('project').value=requested;
+    if(!e('project').value)note('Hãy tạo project từ Dashboard trước.');else await loadScript();
+  }catch(err){error(err.message)}finally{syncButtons()}
+})();
+
+fetch('/api/provider-settings').then(r=>r.json()).then(cfg=>{const x=cfg.choices.script;e('model').value=x.provider+' / '+x.model}).catch(()=>{});
+</script>
+</body>
+</html>

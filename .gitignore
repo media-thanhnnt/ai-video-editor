@@ -1,7 +1,44 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
-projects/
+venv/
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local project data and settings
+/projects/*
+!/projects/.gitkeep
+.ai_video_editor_provider_settings.json
+
+# Rendered temporary files
 *.partial
+*.partial.mp4
+*.partial.mkv
+*.partial.wav
+*.partial.srt
+*.tmp
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Legacy, logs and credentials
+/legacy/
+checkpoint_test.log
+HOTFIX_README.txt
+*.log
+*.pem
+*.key
+secrets.json

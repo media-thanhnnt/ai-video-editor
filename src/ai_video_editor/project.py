@@ -92,6 +92,32 @@ def validate_config(raw: Any) -> dict[str, Any]:
     return data
 
 
+SEQUENCE_PATTERNS = (
+    'frame_%04d.png', 'frame_%04d.jpg', 'frame_%04d.jpeg',
+    'frame_%05d.png', 'frame_%05d.jpg', 'frame_%05d.jpeg',
+)
+
+
+def validate_sequence(seq: Any, sid: str) -> dict[str, Any]:
+    seq = ensure_object(seq, f'scene {sid}.sequence')
+    if set(seq) != {'frames_dir', 'frame_pattern', 'frame_count', 'fps'}:
+        raise ValidationError(f'scene {sid}: sequence requires frames_dir, frame_pattern, frame_count, fps')
+    directory = check_relpath(seq['frames_dir'], f'scene {sid}.sequence.frames_dir')
+    if not directory.startswith('assets/sequences/'):
+        raise ValidationError('Sequence directory must be within assets/sequences/')
+    if require_string(seq['frame_pattern'], 'sequence.frame_pattern') not in SEQUENCE_PATTERNS:
+        raise ValidationError('sequence.frame_pattern must be frame_%04d or frame_%05d with png/jpg/jpeg')
+    if type(seq['frame_count']) is not int or not 1 <= seq['frame_count'] <= 18000:
+        raise ValidationError('sequence.frame_count must be 1..18000')
+    try:
+        seq_fps = Fraction(require_string(seq['fps'], 'sequence.fps'))
+    except (ValueError, ZeroDivisionError) as exc:
+        raise ValidationError('Invalid sequence fps') from exc
+    if seq_fps <= 0 or seq_fps > 120:
+        raise ValidationError('Sequence fps must be >0 and <=120')
+    return seq
+
+
 def validate_storyboard(raw: Any, *, project_id: str | None = None) -> dict[str, Any]:
     data = ensure_object(raw, 'storyboard')
     if data.get('schema_version') != SCHEMA_VERSION:
@@ -156,25 +182,7 @@ def validate_storyboard(raw: Any, *, project_id: str | None = None) -> dict[str,
                 check_relpath(scene['audio'], f'scene {sid}.audio')
             elif scene.get('narration', '').strip():
                 raise ValidationError(f'scene {sid}: narration without audio is not supported')
-            seq = ensure_object(scene.get('sequence'), f'scene {sid}.sequence')
-            if set(seq) != {'frames_dir', 'frame_pattern', 'frame_count', 'fps'}:
-                raise ValidationError(f'scene {sid}: sequence requires frames_dir, frame_pattern, frame_count, fps')
-            directory = check_relpath(seq['frames_dir'], f'scene {sid}.sequence.frames_dir')
-            if not directory.startswith('assets/sequences/'):
-                raise ValidationError('Sequence directory must be within assets/sequences/')
-            pattern = require_string(seq['frame_pattern'], 'sequence.frame_pattern')
-            # Keep the pattern deliberately narrow: no globbing, traversals, or FFmpeg expressions.
-            if pattern not in ('frame_%04d.png', 'frame_%04d.jpg', 'frame_%04d.jpeg',
-                               'frame_%05d.png', 'frame_%05d.jpg', 'frame_%05d.jpeg'):
-                raise ValidationError('sequence.frame_pattern must be frame_%04d or frame_%05d with png/jpg/jpeg')
-            if type(seq['frame_count']) is not int or not 1 <= seq['frame_count'] <= 18000:
-                raise ValidationError('sequence.frame_count must be 1..18000')
-            try:
-                seq_fps = Fraction(require_string(seq['fps'], 'sequence.fps'))
-            except (ValueError, ZeroDivisionError) as exc:
-                raise ValidationError('Invalid sequence fps') from exc
-            if seq_fps <= 0 or seq_fps > 120:
-                raise ValidationError('Sequence fps must be >0 and <=120')
+            validate_sequence(scene.get('sequence'), sid)
     for i, track in enumerate(data.get('audio_tracks', [])):
         if not isinstance(track, dict) or set(track) != {'file','start_seconds','volume'}:
             raise ValidationError('audio_tracks entries require file, start_seconds, volume')
